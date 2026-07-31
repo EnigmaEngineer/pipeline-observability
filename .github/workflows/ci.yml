@@ -1,0 +1,31 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - run: pip install -r requirements.txt
+      # one entrypoint on purpose. a loop over test files lets a file that asserts
+      # nothing pass, which is how a green tick ends up meaning nothing.
+      - run: python -m tests.run_all
+
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - run: pip install -r requirements.txt
+      # runs the real CLI path twice and compares the counts. it is not enough to run it
+      # twice and let both exit 0, which is what this step used to do.
+      - run: python scripts/smoke.py

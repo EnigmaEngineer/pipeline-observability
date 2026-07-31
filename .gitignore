@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# generated. `python -m pipeline.generate` rebuilds it from a seed.
+data/
+*.duckdb
+*.duckdb.wal
+warehouse/
