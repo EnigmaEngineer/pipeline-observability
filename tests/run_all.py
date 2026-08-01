@@ -13,6 +13,7 @@ MODULES = [
     "tests.test_schema",
     "tests.test_generate",
     "tests.test_pipeline",
+    "tests.test_collect",
 ]
 
 
