@@ -14,6 +14,7 @@ MODULES = [
     "tests.test_generate",
     "tests.test_pipeline",
     "tests.test_collect",
+    "tests.test_tracker",
 ]
 
 
