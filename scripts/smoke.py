@@ -8,11 +8,17 @@ range again and compares.
 The first version of this was two `python -m pipeline.run` steps in the workflow with a
 comment claiming they proved rerun safety. They proved nothing. Running a thing twice is
 not checking it.
+
+The second half runs the observed path and checks that the metadata agrees with the
+warehouse it was watching. Every unit test for the collector points it at a table built
+inside the test. This is the only place the numbers it records are checked against a
+pipeline that ran for real.
 """
 
 import subprocess
 import sys
 import tempfile
+from datetime import date
 from pathlib import Path
 
 import duckdb
@@ -40,6 +46,52 @@ def counts(db):
     return total, rows
 
 
+def observed(raw, tmp):
+    """Run the observed path and hold the metadata to the warehouse.
+
+    The invariant that matters: the row counts in obs_dataset_metric have to add up to
+    the rows actually in raw_orders. A collector that quietly profiled the whole table
+    instead of the partition, or profiled it before the load, passes every unit test and
+    fails this.
+    """
+    db = str(Path(tmp) / "observed.duckdb")
+    obs_db = str(Path(tmp) / "obs.duckdb")
+    proc = subprocess.run(
+        [sys.executable, "scripts/run_observed.py", "--start", START, "--end", END,
+         "--raw", raw, "--db", db, "--obs-db", obs_db, "--quiet"],
+        capture_output=True, text=True)
+    if proc.returncode != 0:
+        print(proc.stdout)
+        print(proc.stderr, file=sys.stderr)
+        return 1, "run_observed failed"
+
+    days = (date.fromisoformat(END) - date.fromisoformat(START)).days + 1
+    wh = duckdb.connect(db, read_only=True)
+    loaded = wh.execute("SELECT count(*) FROM raw_orders").fetchone()[0]
+    wh.close()
+
+    obs = duckdb.connect(obs_db, read_only=True)
+    runs = obs.execute("SELECT count(*) FROM obs_run WHERE status = 'success'").fetchone()[0]
+    recorded = obs.execute(
+        "SELECT sum(row_count) FROM obs_dataset_metric WHERE dataset = 'raw_orders'"
+    ).fetchone()[0]
+    unfinished = obs.execute(
+        "SELECT count(*) FROM obs_run WHERE status = 'running'").fetchone()[0]
+    columns = obs.execute("SELECT count(*) FROM obs_column_metric").fetchone()[0]
+    obs.close()
+
+    if recorded != loaded:
+        return 1, f"metadata says {recorded} raw rows, the warehouse holds {loaded}"
+    if runs != days * 2:
+        return 1, f"{runs} successful runs recorded for {days} days of two tasks"
+    if unfinished:
+        return 1, f"{unfinished} runs left at status running after a clean finish"
+    if columns != days * (11 + 8):
+        return 1, f"{columns} column metrics, expected {days * (11 + 8)}"
+    return 0, (f"observed ok: {runs} runs, {recorded} rows agreed with the warehouse, "
+               f"{columns} column metrics")
+
+
 def main():
     with tempfile.TemporaryDirectory() as tmp:
         raw = str(Path(tmp) / "raw")
@@ -54,6 +106,8 @@ def main():
            "--raw", raw, "--db", db, "--quiet")
         second_total, second_rows = counts(db)
 
+        code, message = observed(raw, tmp)
+
     if first_total == 0:
         print("FAIL: the first run loaded nothing")
         return 1
@@ -66,7 +120,8 @@ def main():
 
     print(f"smoke ok: {first_total} rows over {len(first_rows)} partitions, "
           f"unchanged after a full rerun")
-    return 0
+    print(message)
+    return code
 
 
 if __name__ == "__main__":

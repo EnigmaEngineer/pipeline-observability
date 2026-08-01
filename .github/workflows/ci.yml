@@ -27,5 +27,6 @@ jobs:
           python-version: "3.10"
       - run: pip install -r requirements.txt
       # runs the real CLI path twice and compares the counts. it is not enough to run it
-      # twice and let both exit 0, which is what this step used to do.
+      # twice and let both exit 0, which is what this step used to do. the second half
+      # runs the observed path and checks the metadata against the warehouse it watched.
       - run: python scripts/smoke.py
