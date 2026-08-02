@@ -8,11 +8,11 @@ That is also how it works in a real deployment, where the collector is a schedul
 listener rather than lines inside the task.
 
 The collection happens outside the tracked block on purpose. Inside it, every profile
-query would land in the duration of the run it was profiling, and the day-3 baseline for
+query would land in the duration of the run it was profiling, and the duration baseline for
 run duration would be learning the cost of its own observability. That is not a rounding
-error here. Recorded median duration is 10 ms for load_raw and 7 ms for build_daily,
-against roughly 41 ms to collect each dataset. Folding it in would have made a 10 ms task
-report 51 ms and left the baseline measuring mostly itself.
+error here. Recorded median duration is 11 ms for load_raw and 7 ms for build_daily,
+against roughly 38 ms to collect each dataset. Folding it in would have made an 11 ms task
+report 49 ms and left the baseline measuring mostly itself.
 
     python scripts/run_observed.py --start 2026-03-01 --end 2026-03-14
 """

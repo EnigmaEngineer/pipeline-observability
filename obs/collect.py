@@ -3,7 +3,7 @@
 Every column summary comes out of a single SELECT with all the aggregates side by side.
 The reason is not the one this file was written to prove. The expectation was that one
 scan would beat one query per column. Measured on 254,346 rows it does not. The single
-pass takes 81.2 ms and the eleven column loop takes 78.5 ms, because DuckDB is columnar
+pass takes 79.4 ms and the eleven column loop takes 76.9 ms, because DuckDB is columnar
 and a query reading one column never touched the other ten.
 
 What the single pass does buy is a consistent read. Eleven queries against a live table
@@ -37,15 +37,16 @@ from .model import (
     now_utc,
 )
 
-# Exact, not HyperLogLog. approx_count_distinct is 1.15x faster on this table and its
+# Exact, not HyperLogLog. approx_count_distinct is 1.14x faster on this table and its
 # error is nothing like the small wobble the name suggests. Measured against exact counts
 # on raw_orders it was 25 percent wrong on `status`, a column with four values that came
 # back as three. A monitor watching for a new status value would have been blind to the
-# one thing it exists to catch. 1.15x does not buy that.
+# one thing it exists to catch. 1.14x does not buy that.
 DISTINCT_EXACT = True
 
-# Quantiles are the most expensive thing in the single pass, 30.9 ms of 81.2, and
-# approx_quantile is 2.57x faster at a worst error of 0.27 percent. It is still not used.
+# Quantiles are the most expensive thing in the single pass, 31.4 ms of 79.4, and
+# approx_quantile was 2.57x faster at a worst error of 0.27 percent on the day-2 run.
+# It is still not used.
 # The estimator is a t-digest and it depends on the order rows arrive in. Reading the same
 # 254,346 rows in a different physical order moved p05 by 0.35 percent with the data
 # unchanged. A drift check built on that starts with a noise floor it did not choose. At a
