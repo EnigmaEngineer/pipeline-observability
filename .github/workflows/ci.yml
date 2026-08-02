@@ -28,5 +28,7 @@ jobs:
       - run: pip install -r requirements.txt
       # runs the real CLI path twice and compares the counts. it is not enough to run it
       # twice and let both exit 0, which is what this step used to do. the second half
-      # runs the observed path and checks the metadata against the warehouse it watched.
+      # runs the observed path, checks the metadata against the warehouse it watched, and
+      # then fits a baseline on it. a fortnight is two observations per weekday, so the
+      # correct answer there is no weekday bands at all.
       - run: python scripts/smoke.py

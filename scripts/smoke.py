@@ -23,6 +23,10 @@ from pathlib import Path
 
 import duckdb
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from obs import baseline, history  # noqa: E402
+
 START = "2026-03-02"
 END = "2026-03-15"
 
@@ -88,8 +92,28 @@ def observed(raw, tmp):
         return 1, f"{unfinished} runs left at status running after a clean finish"
     if columns != days * (11 + 8):
         return 1, f"{columns} column metrics, expected {days * (11 + 8)}"
+
+    # Fourteen days is two observations per weekday. A baseline that produced seven bands
+    # from that would be inventing confidence, so the minimum has to bite here. This is
+    # the only place the model meets metadata a real pipeline wrote rather than a list
+    # built inside a test.
+    obs = duckdb.connect(obs_db, read_only=True)
+    volume, skipped = history.volume_history(obs)
+    obs.close()
+    if len(volume) != days:
+        return 1, f"volume history has {len(volume)} observations for {days} partitions"
+    if skipped:
+        return 1, f"{skipped} partition keys were unreadable"
+    keyed = baseline.fit_bands(history.keyed(volume))
+    if keyed:
+        return 1, (f"{len(keyed)} weekday bands built from {days} days, which is "
+                   f"{days / 7:.0f} observations each")
+    pooled = baseline.fit_bands(history.unkeyed(volume))
+    if None not in pooled or pooled[None].degenerate:
+        return 1, "no usable pooled band from a clean fortnight"
     return 0, (f"observed ok: {runs} runs, {recorded} rows agreed with the warehouse, "
-               f"{columns} column metrics")
+               f"{columns} column metrics. {days} days build no weekday band and one "
+               f"pooled band of {pooled[None].lo:.0f} to {pooled[None].hi:.0f}")
 
 
 def main():
