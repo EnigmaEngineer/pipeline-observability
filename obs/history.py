@@ -20,6 +20,7 @@ loses rows from its own training set has no business telling anyone else about d
 quality.
 """
 
+import json
 from datetime import date
 
 PARTITION_PREFIX = "dt="
@@ -124,6 +125,59 @@ def run_order(con, pipeline="orders", task="load_raw"):
         [pipeline, task],
     ).fetchall()
     return rows
+
+
+def column_history(con, dataset="raw_orders", column="order_amount_usd",
+                   pipeline="orders"):
+    """Per partition column metrics, from the last successful run that produced them.
+
+    Same rule as the other two readers. One observation per partition, taken from the
+    highest attempt, failed runs excluded. The row count rides along because every
+    proportion in `obs/drift.py` is a share of the partition and because the coupling
+    check needs it.
+
+    Returns `(observations, skipped)` where an observation is a dict carrying the
+    weekday, the partition date and the raw stored values. A dict rather than a tuple
+    because there are six fields and a positional row of six is where the day-2 slicing
+    bug came from.
+    """
+    rows = con.execute(
+        """
+        SELECT r.partition_key, r.attempt, m.quantiles_json, m.null_count,
+               m.distinct_count, m.top_values_json, d.row_count
+          FROM obs_column_metric m
+          JOIN obs_run r ON r.run_id = m.run_id
+          JOIN obs_dataset_metric d
+            ON d.run_id = m.run_id AND d.dataset = m.dataset
+         WHERE m.dataset = ? AND m.column_name = ? AND r.pipeline = ?
+               AND r.status = 'success'
+         ORDER BY r.partition_key, r.attempt
+        """,
+        [dataset, column, pipeline],
+    ).fetchall()
+
+    best = {}
+    for row in sorted(rows, key=lambda r: r[1]):
+        best[row[0]] = row
+
+    observations = []
+    skipped = 0
+    for partition_key, _attempt, qj, nulls, distinct, tvj, row_count in best.values():
+        day = partition_date(partition_key)
+        if day is None:
+            skipped += 1
+            continue
+        observations.append({
+            "weekday": day.weekday(),
+            "date": day,
+            "quantiles": None if qj is None else json.loads(qj),
+            "null_count": nulls,
+            "distinct_count": distinct,
+            "top_values": None if tvj is None else json.loads(tvj),
+            "row_count": row_count,
+        })
+    observations.sort(key=lambda o: o["date"])
+    return observations, skipped
 
 
 def _shape(rows):
