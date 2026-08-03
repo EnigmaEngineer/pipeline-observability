@@ -25,7 +25,7 @@ import duckdb
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from obs import baseline, history  # noqa: E402
+from obs import baseline, drift, history  # noqa: E402
 
 START = "2026-03-02"
 END = "2026-03-15"
@@ -111,9 +111,31 @@ def observed(raw, tmp):
     pooled = baseline.fit_bands(history.unkeyed(volume))
     if None not in pooled or pooled[None].degenerate:
         return 1, "no usable pooled band from a clean fortnight"
+
+    # The drift monitor against metadata a real pipeline wrote. The unit tests build the
+    # column history by hand, so this is the only place the reader and the monitor meet
+    # rows the collector actually produced. Two properties are checked rather than any
+    # number, because a fortnight is too short for a fire rate to mean anything.
+    obs = duckdb.connect(obs_db, read_only=True)
+    columns_seen, dropped = history.column_history(obs, "raw_orders", "customer_id")
+    monitor = drift.Monitor.fit("customer_id", columns_seen)
+    status_seen, _ = history.column_history(obs, "raw_orders", "status")
+    status_monitor = drift.Monitor.fit("status", status_seen)
+    obs.close()
+    if len(columns_seen) != days or dropped:
+        return 1, (f"column history has {len(columns_seen)} observations and dropped "
+                   f"{dropped} for {days} partitions")
+    if "distinct_count" not in monitor.refused:
+        return 1, ("customer_id distinct_count was accepted as a drift signal against "
+                   "real metadata, and it tracks the row count")
+    verdict = status_monitor.check("distinct_count", 0, 99)
+    if verdict is None or verdict.status == "ok":
+        return 1, "a new status category did not register against real metadata"
     return 0, (f"observed ok: {runs} runs, {recorded} rows agreed with the warehouse, "
                f"{columns} column metrics. {days} days build no weekday band and one "
-               f"pooled band of {pooled[None].lo:.0f} to {pooled[None].hi:.0f}")
+               f"pooled band of {pooled[None].lo:.0f} to {pooled[None].hi:.0f}. "
+               f"customer_id distinct_count refused at r="
+               f"{monitor.refused['distinct_count']['coupling']:+.4f}")
 
 
 def main():
