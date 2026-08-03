@@ -1,8 +1,8 @@
 # pipeline-observability
 
 Catch a broken data pipeline before the dashboard consumers do. This repo holds a small
-orders pipeline and the run-metadata schema that watches it. Freshness, volume, schema and
-distribution monitors get built on top of that metadata over the next six days.
+orders pipeline and the run-metadata schema that watches it, with freshness, volume,
+schema and distribution monitors built on top of that metadata.
 
 ```
 pip install -r requirements.txt
@@ -31,7 +31,7 @@ the cost of the collector measurable.
                                                      |
                                                      v
                                           drift, alerts, timeline
-                                                (days 4 to 6)
+                                           (drift done, rest wip)
 ```
 
 The observability side is `obs/`. The thing being observed is `pipeline/`. They do not
@@ -655,16 +655,6 @@ it.
 
 **No Airflow yet.** The blueprint lists it and `pipeline/run.py` is a plain loop today.
 The DAG comes when there is more than one task worth scheduling.
-
-## Week plan
-
-- Day 1: metadata schema, repo, target pipeline to instrument (done)
-- Day 2: collector and storage (done)
-- Day 3: seasonal baselines for volume and duration (done, and duration is not seasonal)
-- Day 4: distribution drift checks (done, and two of the three obvious signals were not)
-- Day 5: alerting, severity, suppression windows
-- Day 6: incident timeline and injected failures
-- Day 7: README with three worked incident examples
 
 ## Tests
 
