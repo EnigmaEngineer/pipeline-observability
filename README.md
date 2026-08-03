@@ -131,6 +131,16 @@ this section was re-measured on the day-3 run, so the timings differ a little fr
 an earlier version of this file carried. The only figures below not taken that day are the
 two `approx_quantile` ones, which are marked where they appear.
 
+Re-checked on the day-4 run rather than rewritten. Two back to back runs of
+`scripts/profile_cost.py` gave 78.6 ms and 78.8 ms for the single pass against the 79.4 ms
+below, so the timings hold to about one percent and the table stays as measured on day 3.
+The approximate distinct errors do not hold. `loaded_at` came back 15.97 percent wrong on
+day 3 and 6.72 percent wrong today on identical data, because a HyperLogLog sketch depends
+on the order rows are fed to it. That is the same order dependence that keeps
+`approx_quantile` out of the collector, and it makes the case against approximate distinct
+counts stronger rather than weaker. An error you cannot reproduce is worse than a large one
+you can.
+
 ```
 generate   254,346 events across 119 partitions               2.7 s
 pipeline   the same range with nothing watching it            2.5 s   median of 3
@@ -394,6 +404,141 @@ are 7.5 to 16.2 ms for `load_raw` firing on 6 of 119, and 3.9 to 12.7 ms for `bu
 firing on 2 of 119. Those rates are measured on the training data, so they are a floor on
 the false alarm rate rather than an estimate of the real one.
 
+## Distribution drift
+
+`obs/drift.py`, `obs/history.column_history`, and `scripts/drift_report.py`, which
+measures every claim in this section. Run it with:
+
+```
+python scripts/drift_report.py --obs-db /tmp/obs.duckdb --db /tmp/orders.duckdb \
+    --chart docs/drift.png
+```
+
+The blueprint line says "distribution drift checks on key columns". Three things a stored
+column profile offers look like drift signals. Measured on the 119 partition history, two
+of them are not.
+
+### distinct_count is the volume monitor with a different name
+
+Correlation between a column's distinct count and the partition's row count, over the same
+119 partitions:
+
+| column | distinct count against rows | verdict |
+|---|---|---|
+| customer_id | +0.9999 | refused |
+| order_amount_usd | +0.9985 | refused |
+| item_count | +0.1626 | kept |
+| status, channel, coupon_code | no spread, constant | held as a constant |
+
+A weekday baseline fitted on `customer_id` distinct counts lands on a width ratio of 0.404
+with 80.5 percent of variance explained. The volume baseline from day 3 lands on 0.406 and
+80.4 percent. It is the same signal to three decimal places. Band it and you have a monitor
+that fires when traffic moves and reports it as a cardinality problem.
+
+Dividing by the row count is not the fix. `distinct_ratio` is refused on five of the six
+watched columns, most of them at about minus 0.99, because a column with a fixed vocabulary
+has a constant numerator and a growing denominator. On `customer_id` the ratio survives the
+coupling check at minus 0.6956 and then still comes out **weekday keyed** at a ratio of
+0.723, because the expected number of distinct values in a sample is not linear in the
+sample size. Normalising reduces the volume signature and does not remove it.
+
+`volume_coupling` and `usable_signals` make this a measurement in shipped code. The
+refusals and their measured coupling are carried on the monitor, so it can report what it
+declined to watch.
+
+### seven quantiles cannot answer the question, and the size of the hole is exactly 0.25
+
+The natural statistic for "has this distribution moved" is the Kolmogorov Smirnov distance.
+It cannot be computed from what day 1 chose to store. Seven quantiles pin the inverse
+cumulative function at seven places and say nothing about the shape between them, so the
+distance can only be bounded from below. `ks_bound` does that.
+
+The gaps between the stored probabilities are 0.01, 0.04, 0.20, 0.25, 0.25, 0.20, 0.04 and
+0.01. Inside one gap both cumulative functions start and end at the same two points and are
+free in between, so they can separate by the whole gap while every stored quantile agrees.
+The blind spot is the largest gap, which is **0.25**.
+
+That is an argument until something reaches it. `drift.worst_case_pair` builds two samples
+whose stored vectors agree to 0.00e+00 and whose true KS distance is 0.2499, and
+`tests/test_drift.py` asserts it. A quarter of the mass can move without moving a single
+number this schema keeps.
+
+The bound is honest and on this feed it is silent:
+
+| pair | true KS from the rows | bound from the seven quantiles |
+|---|---|---|
+| 03-02 against 03-03 | 0.0354 | 0.0000 |
+| 03-02 against 03-04 | 0.0238 | 0.0000 |
+| 03-02 against 03-08 | 0.0388 | 0.0000 |
+
+Zero of 118 consecutive partition pairs bound above zero, on both numeric columns. So the
+bound is not the detector. It ships as a constant zero signal, which means it fires exactly
+when drift is provable and never on a judgement call. What detects is `quantile_shift`, the
+per probability movement of the stored values scaled by the reference interquartile range.
+It answers a narrower question than the one anyone wants, and it is the question the data
+can support.
+
+### the trend problem from day 3 does not transfer, and a smaller one does
+
+`ot-017` says 35 percent of the volume band's width is trend rather than variability. The
+same question here gets a different answer. Across the window the row count moves 15.88
+percent and these signals do not follow it.
+
+| signal | first 28 | last 28 | change |
+|---|---|---|---|
+| order_amount_usd quantile_shift | 0.22382 | 0.21312 | -4.78% |
+| coupon_code null_rate | 0.77956 | 0.77917 | -0.05% |
+| customer_id distinct_ratio | 0.98990 | 0.98852 | -0.14% |
+| row_count | 2065.5 | 2393.5 | +15.88% |
+
+The level does not trend. The noise does, and that is the second order version of the same
+problem. A distance from a fixed reference is sampling error when nothing is wrong, and
+sampling error falls as one over the square root of the partition size. Bucketed by row
+count rather than by date, so nothing but size varies:
+
+| signal | small n | large n | observed ratio | predicted |
+|---|---|---|---|---|
+| order_amount_usd quantile_shift | 0.2072 | 0.1644 | 0.794 | 0.813 |
+| coupon_code share_tv | 0.0142 | 0.0101 | 0.710 | 0.813 |
+| status share_tv | 0.0098 | 0.0085 | 0.866 | 0.813 |
+| channel share_tv | 0.0142 | 0.0125 | 0.881 | 0.813 |
+
+Four signals, all near the predicted ratio. So a band fitted over a window where traffic
+grew is slightly too wide at the end of it, for a reason that has nothing to do with the
+distributions. The effect is a few percent here against 35 percent for volume, which is why
+it is recorded rather than fixed.
+
+### a signal that has never moved is held as a constant, not as a band
+
+Day 3 made a band with zero spread refuse to judge, which is right for a duration. It is
+wrong here. `status` has held four distinct values for all 119 partitions and a fifth
+appearing is the incident a categorical monitor exists to catch. `order_amount_usd` has
+never had a null. Under a robust band both are degenerate and stay silent forever.
+
+So a flat signal is held as a constant and any change fires. It is a different status word,
+`changed`, for the same reason `unbanded` and `unknown_key` are different words. On this
+history that covers 11 of the 25 watched signals.
+
+### fire rates, on training data
+
+| column | signal | kind | fired | rate |
+|---|---|---|---|---|
+| order_amount_usd | quantile_shift | pooled | 7 | 0.059 |
+| coupon_code | share_tv | pooled | 4 | 0.034 |
+| status | share_tv | pooled | 4 | 0.034 |
+| channel | share_tv | pooled | 1 | 0.008 |
+| customer_id | distinct_ratio | keyed | 1 | 0.008 |
+| item_count | quantile_shift | pooled | 0 | 0.000 |
+
+`item_count` is worth its own line. It is an integer between 1 and 9, so its seven stored
+quantiles are the same seven integers on all 119 partitions and `quantile_shift` is exactly
+zero throughout. That is the day-3 resolution floor arriving in a different place. The
+column has a distribution and this schema cannot see it move.
+
+Every rate here is measured on the partitions the reference and the bands were fitted on,
+so they are floors on the false alarm rate rather than estimates of it. That holds until
+day 6.
+
 ## Known limitations
 
 **The source data is generated, and its weekly shape is assumed rather than observed.**
@@ -437,6 +582,18 @@ consumer yet.
 the observations it was fitted on is at its most flattering, so those rates are a floor and
 not an estimate. There is no held out period and there will not be a meaningful one until
 day 6 puts known failures in.
+
+**A quarter of a distribution can move without this schema noticing.** Measured above and
+demonstrated with a constructed pair. Storing more probabilities shrinks the blind spot and
+never closes it, and the honest fix is a sketch that supports a real distance rather than
+more fixed points. That is a day-1 schema decision and reopening it would throw away the
+history. It stays, named.
+
+**The reference for every drift signal is fitted on the whole history and then measured
+against it.** Same shape as the day-3 fire rates and the same answer. These are floors.
+
+**Nothing here watches a column that is not in `WATCHED`.** The list is six columns picked
+by hand in `scripts/drift_report.py`. Generating suites from observed profiles is day 6.
 
 **A cold start cannot be labelled from the metadata as it stands.** The 921 ms first run is
 correctly flagged and there is no column that says why. Suppressing it needs the collector
@@ -504,7 +661,7 @@ The DAG comes when there is more than one task worth scheduling.
 - Day 1: metadata schema, repo, target pipeline to instrument (done)
 - Day 2: collector and storage (done)
 - Day 3: seasonal baselines for volume and duration (done, and duration is not seasonal)
-- Day 4: distribution drift checks
+- Day 4: distribution drift checks (done, and two of the three obvious signals were not)
 - Day 5: alerting, severity, suppression windows
 - Day 6: incident timeline and injected failures
 - Day 7: README with three worked incident examples
@@ -538,6 +695,14 @@ test goes red is the only way to know a test tests anything.
 | `null_count` reports the non nulls instead | 31/32 |
 | identifiers are not quoted | crashes on a column named `select` |
 | `collect_into` raises instead of recording a gap | the failure escapes to the caller |
+| `ks_bound` assumes F(x) equals p at its own quantile | 52/53, two identical tied vectors bound apart by 0.49 |
+| `ks_bound` reads only the reference vector | 52/53, a provable separation reports as zero |
+| `blind_spot` takes the smallest gap | 52/53, the constructed pair no longer reaches it |
+| `usable_signals` only checks positive correlation | 52/53, every inverse signal gets through |
+| a constant signal is banded instead of held constant | 52/53, a fifth status category passes |
+| `column_history` keeps the first attempt | 52/53, a failed retry becomes the observation |
+| `column_history` drops the success filter | 52/53, a failed run's profile enters the history |
+| `raises_message` stops comparing the message | 52/53, caught by its own probe |
 | top values ignore the partition filter | 30/32 |
 | the run row is written after the work instead of before | the running row is not there to find |
 | the tracker swallows the failure | 15/18 |
