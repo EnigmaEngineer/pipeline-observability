@@ -62,6 +62,7 @@ class RunRecord:
     error: Optional[str] = None
     code_version: Optional[str] = None
     triggered_by: str = "schedule"
+    cold_start: bool = False
 
     def finish(self, ended_at, error=None):
         self.ended_at = ended_at

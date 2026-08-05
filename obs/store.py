@@ -24,12 +24,12 @@ def insert_run(con, run: RunRecord):
         """
         INSERT INTO obs_run (run_id, pipeline, task, partition_key, attempt,
                              started_at, ended_at, duration_ms, status, error,
-                             code_version, triggered_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                             code_version, triggered_by, cold_start)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [run.run_id, run.pipeline, run.task, run.partition_key, run.attempt,
          run.started_at, run.ended_at, run.duration_ms, run.status, run.error,
-         run.code_version, run.triggered_by],
+         run.code_version, run.triggered_by, run.cold_start],
     )
 
 

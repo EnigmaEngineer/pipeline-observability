@@ -14,6 +14,10 @@ Two costs, both real. It is two writes per run instead of one. And a row can sit
 'running' forever, because the one failure mode that cannot be caught here is the one
 where the process stops existing. `stale_runs` is how those get found, and choosing the
 cutoff is a day-5 problem since it depends on what the pipeline's normal duration is.
+
+The tracker also marks the first attempt at each (pipeline, task) in a process as a cold
+start. That belongs here and nowhere else, because process boundaries do not survive into
+the stored rows.
 """
 
 import uuid
@@ -24,6 +28,19 @@ from . import store
 from .model import RunRecord, now_utc
 
 ERROR_CHARS = 400
+
+# Which (pipeline, task) pairs this process has already run once. Process scoped state,
+# which is the whole point. A task pays its import cost, its connection cost and its
+# first-touch page faults once per process, and no query over the stored rows can work
+# out where a process ended and the next one began. So the tracker is the only place that
+# knows, and it has to write it down while it still does.
+_SEEN = set()
+
+
+def reset_process_state():
+    """Forget which tasks this process has run. For tests, and for a runner that wants
+    to simulate separate processes without being separate processes."""
+    _SEEN.clear()
 
 
 def new_run_id():
@@ -68,6 +85,9 @@ def track(con, pipeline, task, partition_key=None, code_version=None,
     the job.
     """
     started = clock()
+    signature = (pipeline, task)
+    cold = signature not in _SEEN
+    _SEEN.add(signature)
     record = RunRecord(
         run_id=run_id or new_run_id(),
         pipeline=pipeline,
@@ -78,6 +98,7 @@ def track(con, pipeline, task, partition_key=None, code_version=None,
         attempt=next_attempt(con, pipeline, task, partition_key),
         code_version=code_version,
         triggered_by=triggered_by,
+        cold_start=cold,
     )
     store.insert_run(con, record)
     try:

@@ -98,6 +98,51 @@ def run():
          "a long error is truncated rather than filling the column")
     c.ok(tracker.new_run_id() != tracker.new_run_id(), "run ids are not repeated")
 
+    # cold start. this is process scoped state, so every case below has to start from a
+    # known point or it depends on which tests ran first, which is the kind of ordering
+    # dependency that shows up once a month and never reproduces.
+    tracker.reset_process_state()
+    cold_con = store.connect()
+    with tracker.track(cold_con, "orders", "load_raw", "dt=2026-06-01", run_id="c1"):
+        pass
+    with tracker.track(cold_con, "orders", "load_raw", "dt=2026-06-02", run_id="c2"):
+        pass
+    # a different task in the same process is cold in its own right. the 08-02 finding
+    # was that build_daily has no cold start where load_raw has a large one, so this is
+    # per task and a per process flag would be wrong.
+    with tracker.track(cold_con, "orders", "build_daily", "dt=2026-06-01", run_id="c3"):
+        pass
+    flags = dict(cold_con.execute(
+        "SELECT run_id, cold_start FROM obs_run WHERE run_id IN ('c1','c2','c3')"
+    ).fetchall())
+    c.eq(flags["c1"], True, "the first run of a task in a process is cold")
+    c.eq(flags["c2"], False, "the second is not")
+    c.eq(flags["c3"], True, "and a different task is cold in its own right")
+
+    # a failed first run still consumed the warmup, so the retry after it is warm. the
+    # opposite rule would mark every retry of a broken task as cold forever.
+    tracker.reset_process_state()
+    try:
+        with tracker.track(cold_con, "orders", "reconcile", "dt=2026-06-01",
+                           run_id="c4"):
+            raise RuntimeError("boom")
+    except RuntimeError:
+        pass
+    with tracker.track(cold_con, "orders", "reconcile", "dt=2026-06-01", run_id="c5"):
+        pass
+    retry = dict(cold_con.execute(
+        "SELECT run_id, cold_start FROM obs_run WHERE run_id IN ('c4','c5')"
+    ).fetchall())
+    c.eq(retry["c4"], True, "a failed first attempt is still the cold one")
+    c.eq(retry["c5"], False, "and the retry after it is warm")
+
+    tracker.reset_process_state()
+    with tracker.track(cold_con, "orders", "load_raw", "dt=2026-06-03", run_id="c6"):
+        pass
+    c.eq(one(cold_con, "SELECT cold_start FROM obs_run WHERE run_id = 'c6'")[0], True,
+         "resetting the process state makes the next run cold again")
+    cold_con.close()
+
     con.close()
     return c
 

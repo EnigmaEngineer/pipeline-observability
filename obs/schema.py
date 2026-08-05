@@ -4,6 +4,7 @@ Four tables. Everything the monitors read on later days comes out of these, so t
 grain of each one is the decision that matters most here.
 
     obs_run             one row per attempt at a (pipeline, task, partition)
+                        carries cold_start, see below
     obs_schema_version  one row per distinct column list a dataset has ever had
     obs_dataset_metric  one row per (run_id, dataset)
     obs_column_metric   one row per (run_id, dataset, column_name)
@@ -52,6 +53,7 @@ TABLES = [
             error         VARCHAR,
             code_version  VARCHAR,
             triggered_by  VARCHAR NOT NULL DEFAULT 'schedule',
+            cold_start    BOOLEAN NOT NULL DEFAULT FALSE,
             UNIQUE (pipeline, task, partition_key, attempt)
         )
         """,
@@ -108,6 +110,14 @@ TABLES = [
         """,
     ),
 ]
+
+# cold_start says whether this was the first attempt at its (pipeline, task) inside the
+# process that ran it. Added day 5 because the duration monitor fires on every restart and
+# nothing in the metadata could tell a restart from a regression. It has to be written by
+# the tracker at the moment the run starts. It cannot be recovered later from a gap in
+# started_at, because a backfill and a schedule produce the same gaps and mean opposite
+# things by them. What it is worth as a suppression rule is a separate question and the
+# answer on this feed is uncomfortable. See obs/alerting.py.
 
 # min_value and max_value are text on purpose. One table holds columns of every type and
 # splitting into numeric, text and timestamp variants triples the width to serve a field
