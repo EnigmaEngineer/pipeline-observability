@@ -2,7 +2,7 @@
 
 Every column summary comes out of a single SELECT with all the aggregates side by side.
 The reason is not the one this file was written to prove. The expectation was that one
-scan would beat one query per column. Measured on 254,346 rows it does not. The single
+scan would beat one query per column. Measured on 254,952 rows it does not. The single
 pass takes 79.4 ms and the eleven column loop takes 76.9 ms, because DuckDB is columnar
 and a query reading one column never touched the other ten.
 
@@ -48,7 +48,7 @@ DISTINCT_EXACT = True
 # approx_quantile was 2.57x faster at a worst error of 0.27 percent on the day-2 run.
 # It is still not used.
 # The estimator is a t-digest and it depends on the order rows arrive in. Reading the same
-# 254,346 rows in a different physical order moved p05 by 0.35 percent with the data
+# 254,952 rows in a different physical order moved p05 by 0.35 percent with the data
 # unchanged. A drift check built on that starts with a noise floor it did not choose. At a
 # thousand times this volume the answer flips and the tradeoff has to be revisited.
 

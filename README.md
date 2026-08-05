@@ -30,8 +30,7 @@ the cost of the collector measurable.
                                        obs.history  ->  obs.baseline   (done)
                                                      |
                                                      v
-                                          drift, alerts, timeline
-                                           (drift done, rest wip)
+                                    drift, alerts, freshness, timeline  (done)
 ```
 
 The observability side is `obs/`. The thing being observed is `pipeline/`. They do not
@@ -103,7 +102,7 @@ for `load_raw` and 7 ms for `build_daily` against roughly 38 ms to collect a dat
 the duration baseline would have been learning mostly the price of observability.
 
 **Every column summary comes from one SELECT, and not for the reason I expected.** The
-plan was that one scan would beat one query per column. It does not. On 254,346 rows the
+plan was that one scan would beat one query per column. It does not. On 254,952 rows the
 single pass takes 79.4 ms and the eleven column loop takes 76.9 ms, because DuckDB is
 columnar and a query reading one column never touched the other ten. The single pass stays
 for two other reasons. It is one consistent snapshot rather than eleven, so a row count
@@ -119,12 +118,36 @@ nothing like a small wobble. See the table below. A monitor that cannot see a fo
 the collector does, 31.4 ms of the 79.4, and `approx_quantile` was 2.57x faster at a
 worst error of 0.27 percent when it was measured on the day-2 run. The reason it is
 still not used is that a t-digest depends on the order rows arrive in. Reading the same
-254,346 rows in a different physical order moved p05 by 0.35 percent with nothing about
+254,952 rows in a different physical order moved p05 by 0.35 percent with nothing about
 the data changed. Day 4 is a drift check, and starting it with a noise floor that comes
 from the estimator rather than the data is a bad trade for 19 ms on a job that runs once
 a day. At a thousand times this volume the answer flips.
 
 ## Measured on this machine
+
+**Correction, 2026-08-05. This file published a row count of 254,346 from day 1 to day 5 and
+the real figure is 254,952.** It appeared four times here and twice in `obs/collect.py`. The
+distinct `customer_id` count was wrong by a different amount, 84,649 published against 84,682
+measured, so it was not one transcription slip propagating. `pipeline/generate.py` has a
+single commit and has never been edited, the files on disk match it on every spot check, and
+no 119 day window at the default seed and base produces 254,346. Where the number came from
+is not known. Every figure derived from it has been re-measured rather than adjusted.
+
+The reason it survived five days is worth more than the number. `data/` is gitignored,
+because it is generated. So nothing published off it could be checked by anyone who cloned
+this repo, including me on a later day. **Any figure below that comes from the generated data
+now carries the command that rebuilds it.** That is the cheap half of the fix. The expensive
+half, a checked in checksum of the generated corpus, is not done and is in the limitations.
+
+```
+python -m pipeline.generate --start 2026-01-01 --end 2026-04-29
+python scripts/run_observed.py --start 2026-01-01 --end 2026-04-29
+```
+
+Run on 2026-08-05 into a scratch directory, that first command wrote 254,952 events across
+119 partitions and all 119 files came back byte identical to the ones already on disk under
+`cmp`. So the generator is deterministic at the default seed and the data it produces today
+is the data these figures were taken from.
 
 Sandbox is 2 cores and about 3.9 GB of RAM. Python 3.10, DuckDB 1.5.5. Everything in
 this section was re-measured on the day-3 run, so the timings differ a little from the ones
@@ -142,27 +165,37 @@ it. The data was not identical. `loaded_at` is written as the wall clock time of
 so its 119 values are different timestamps on every run and the sketch was being fed a
 different column each time.
 
-Re-run today, every column whose values really are identical reproduced to the last decimal
-place. `dt` came back at 39.50 percent both days. So did `order_id` at 17.92, `customer_id`
-at 20.91, `ordered_at` at 3.88, `status` at 25.00 and `item_count` at 11.11. The only row
-that moved was `loaded_at`, which is the only column that was not the same data. The
-estimator is stable and the measurement was not.
+The conclusion stands and the evidence behind it has been replaced. The day-4 version rested
+on two runs agreeing on a row count that no longer reproduces, so it is not something a
+reader can check. The 08-05 test is stronger anyway. Build the same table two ways in one
+session, once one partition at a time through the loader and once as a single glob read, and
+compare. Those are genuinely different physical orders. All ten stable columns returned the
+same approximate count under both. `loaded_at` was the only one that moved and it is the only
+column that is not the same data twice. The estimator is stable and the measurement was not.
 
 The order dependence result still holds for `approx_quantile`, where it was established on
 08-01 by reading the same rows in a different physical order. It was never established for
 `approx_count_distinct`, and the errors below are large enough on their own without it.
 
 ```
-2026-08-04 run, one measurement each unless stated
-generate   254,346 events across 119 partitions               5.1 s
+2026-08-05 run, one measurement each unless stated
+generate   254,952 events across 119 partitions               5.1 s
 pipeline   the same range with nothing watching it            4.4 s
-observed   the same range with the collector wrapped round   20.4 s and 21.7 s
+observed   the same range with the collector wrapped round   13.2 s
 collected  238 runs, 2 schema versions, 238 dataset metrics, 2261 column metrics
-tests      9 modules, 304 cases, all passing
+tests      11 modules, 378 cases, all passing
 smoke      27,629 rows over 14 partitions, unchanged after a full rerun
            14 days build no weekday band and one pooled band of 1400 to 3094
 alerts     17 alerts over 119 partitions, 14 incidents, none of them a page
+incidents  10 clean and 10 injected partitions, 8 of 9 faults detected
 ```
+
+The `observed` figure was 20.4 s and 21.7 s on earlier runs and is 13.2 s today. The cause
+is not established. The machine itself has been measured moving by about 1.8x between days
+on identical code, which covers most of a gap this size, and the filesystem finding above is
+a second candidate. Both are plausible and neither was isolated, so this is recorded as an
+unexplained move rather than attributed. Absolute timings in this file are only true on the
+day they were taken.
 
 Collection costs 9.1 s across 238 datasets, about 38 ms each. That is 3.6x the pipeline it
 watches. The ratio is a property of how little each run does here rather than a fact about
@@ -187,17 +220,28 @@ absolute timing does not, which is the argument for quoting the ratio.
 
 `approx_count_distinct` against exact counts on the same table:
 
+Re-measured 2026-08-05 against a `raw_orders` rebuilt by `scripts/run_observed.py`. The
+earlier version of this table was derived from a row count that no longer reproduces, so
+every figure in it was replaced rather than patched. See the correction note below.
+
 | column | exact | approximate | error |
 |---|---|---|---|
-| `order_id` | 254,346 | 299,919 | 17.92% |
-| `customer_id` | 84,649 | 66,950 | 20.91% |
-| `ordered_at` | 249,817 | 240,131 | 3.88% |
-| `order_amount_usd` | 18,096 | 16,220 | 10.37% |
-| `loaded_at` | 119 | 105 | 11.76% |
-| `dt` | 119 | 166 | 39.50% |
+| `order_id` | 254,952 | 226,474 | 11.17% |
+| `customer_id` | 84,682 | 64,837 | 23.43% |
+| `ordered_at` | 250,455 | 257,408 | 2.78% |
+| `order_amount_usd` | 18,078 | 16,134 | 10.75% |
+| `loaded_at` | 119 | 102 | 14.29% |
+| `dt` | 119 | 134 | 12.61% |
 | `status` | 4 | 3 | 25.00% |
 | `item_count` | 9 | 10 | 11.11% |
 | `channel`, `country`, `coupon_code` | 4 to 6 | exact | 0% |
+
+The error is not an order effect. The same table was built two ways on 2026-08-05, once by
+`run_observed.py` inserting one partition at a time with a declared column list and once by
+a single `read_json_auto` glob over all 119 files. Those are different physical row orders.
+Every column above returned a byte identical approximate count under both. The one column
+that moved was `loaded_at`, which stores the wall clock time of the load and is therefore
+different data on every run rather than the same data read differently.
 
 Those errors are far larger than the accuracy usually quoted for HyperLogLog. They are
 reported as measured. I have not worked out why DuckDB's estimator is this far off on a
@@ -614,9 +658,9 @@ was describing the fitting procedure and not the signal.
 ### 238 of 255 alerts were the monitor talking about itself
 
 The first version routed an `unbanded` or `unknown_key` verdict to an `info` alert. Two
-signals on `item_count` cannot be banded, so that produced two alerts on every partition,
-forever, each one saying the same thing about the monitor rather than anything about the
-day. 238 of 255 alerts, 93 percent.
+signals on `item_count` cannot be banded. That produced two alerts on every partition and it
+would have done so forever. Each one said the same thing about the monitor rather than
+anything about the day. 238 of 255 alerts, 93 percent.
 
 Whether a band could be fitted is a fact about the monitor and not about the partition it
 was pointed at. It gets said once, at fit time, by `coverage_gaps`. After the fix the
@@ -713,6 +757,128 @@ grouping and the windows have all been exercised against ordinary data and none 
 against a real incident. Grouping saves three messages here, which is not a case for it.
 Day 6 is when that gets tested.
 
+## Injected failures, and the control arm that mattered more
+
+Days 3 to 5 built six monitors and measured every one of them against a feed that never
+breaks. `pipeline/inject.py` holds ten faults. Each one declares, before the run, which
+monitor should answer for it. `scripts/incident_report.py` runs two arms over the same ten
+future dates, one clean and one injected, judged by monitors fitted once on the clean 119
+and never refitted. Out of sample by construction rather than by promise.
+
+Writing the expectation down first is the only thing that makes a miss visible. A harness
+that reports whatever fired and calls it detection can never fail.
+
+```
+python scripts/incident_report.py --obs-db /tmp/obs.duckdb --db /tmp/wh.duckdb
+```
+
+### the control arm is the finding, not the detection column
+
+Ten clean partitions the fit had never seen. All ten alerted.
+
+| monitor | subject | fired on clean |
+|---|---|---|
+| duration | `duration_ms` | 10 of 10 |
+| volume | `row_count` | 3 of 10 |
+| drift | `customer_id distinct_ratio` | 1 of 10 |
+| drift | `coupon_code null_rate` | 1 of 10 |
+
+A subject that fires on ten of ten clean partitions is saying nothing when it fires on a
+broken one. So detection has to be read as a set difference against this arm and not as a
+count of what went off. Every headline number below is that difference.
+
+![detection against the control arm](docs/day6_detection.png)
+
+The bottom row of that chart is the argument. `no_change` injects nothing at all and still
+raises four alerts. Read the grey bar first on every row.
+
+**8 of 9 faults fired a subject the clean arm did not. Only 6 of 9 were caught by the
+monitor named beforehand.** The tenth scenario is a no-op control and is excluded from
+both.
+
+### the duration baseline learned the speed of a filesystem
+
+The 10 of 10 has a cause and it is not the monitor. Training partitions were read off the
+mounted Projects folder. The arm partitions were written to `/tmp`. Same loader, same code,
+same row counts.
+
+Thirty partitions were copied from the mount to `/tmp` and checked byte identical with
+`filecmp`. Then loaded from both locations, twice each. The cold first run of each pass is
+dropped. That leaves 58 observations per location, measured on 2026-08-05:
+
+```
+mount  data/raw   median 13.66 ms   min 9.58  max 20.07
+tmp    /tmp       median  4.03 ms   min 3.00  max  6.22
+```
+
+A 3.4x gap on identical bytes. A duration band is therefore not a property of the pipeline.
+It is a property of the pipeline plus the storage its input happened to sit on, and moving
+the input pages on everything forever. Table growth was ruled out separately, correlation of
+duration with partition order is +0.0158 once the cold first run is excluded.
+
+An earlier measurement of this put the gap at 1.7x by comparing training partitions against
+arm partitions. Those are different files with different row counts, so it was measuring the
+filesystem and the data at once. The copied byte identical version above is the better test
+and it moved the number a lot. The mount side reproduced closely, 13.4 ms then against 13.66
+now. The `/tmp` side did not, 7.8 ms then against 4.03 now. The ratio is unstable and the
+sign of it is not.
+
+This is `ot-023` and it is not fixed. Three ways out and all of them cost something. Refit
+per environment and say so. Normalise to something storage independent such as milliseconds
+per thousand rows. Or drop duration from the pager. Day 7 decides.
+
+### the tracker was timing its own metadata write
+
+`started = clock()` ran before `next_attempt` and `store.insert_run`, so every duration this
+project has recorded included the cost of writing the row that records it. Measured at 2.8 ms
+against a recorded median of 30, which is 9 percent.
+
+Day 2 moved the profiling queries out of the tracked block for exactly this reason and left
+the run row insert inside it. The fix is a second clock read. **Durations recorded before
+this change and after it are not comparable.**
+
+### day 5's holdout leaked its own reference
+
+`holdout_fire_rates` took bands from the first 70 percent of the history and signal values
+from `signal_series(obs)` over all of it. That function derives its reference from whatever
+list it is handed, so the reference had already seen the held out partitions. Half the split
+was held out.
+
+Fixing it needed `Monitor.signals` to exist first, which is the function that scores a
+partition the fit never saw. **No fitted monitor in this repo could score a new partition
+until day 6.** Every fire rate published before then was in sample on at least one side.
+
+### what the faults found
+
+`late_arrival` had no owner. Nothing in the stack read event time, so `obs/freshness.py` was
+written mid run rather than planned. `event_time_min` and `event_time_max` have been
+collected on every run since day 2 and nothing had ever read them. It detects the late
+partition at page severity. That is the answerable half of `ot-015`. The restatement window
+is still open.
+
+`dropped_column` was missed by the monitor named for it. The loader declares its column
+list, so a column that disappears upstream arrives as a column full of nulls and the schema
+hash never moves. Both hashes came back identical across the clean and dropped arms, and
+`channel` was null on 2,858 of 2,858 rows. The null rate monitor caught it. A schema monitor
+sitting behind a declared column list cannot see an upstream drop, which is an argument for
+profiling the source and not only the landed table.
+
+`item_shift` was missed by everything. Adding a whole integer to half the rows of a 1 to 9
+column produced no new subject. That is the largest move that column can make and it is
+invisible at this resolution, which answers `ot-019` negatively. The fix is a share vector
+for low cardinality integers rather than seven stored quantiles. Not built.
+
+### the timeline
+
+`obs/timeline.py` assembles one partition into four things. The runs that touched it and the
+alerts it raised. The schema in force at the time. The last known good partition before it.
+It imports no duckdb and takes rows from `obs/history.py`, so it is a view rather than a
+second query layer.
+
+Upstream is declared rather than derived. The day-1 schema has four tables and none of them
+holds an edge between tasks, so anything claiming to derive a dependency graph here would be
+inferring it from names. Declared and honest beats derived and wrong.
+
 ## Known limitations
 
 **The source data is generated, and its weekly shape is assumed rather than observed.**
@@ -727,12 +893,41 @@ this feed and neither is evidence that the design works. Two things push back. T
 generator is multiplicative and the raw space band is additive, so those two configurations
 are not the same model and the report runs both. More importantly the test of this baseline
 is not fit quality. It is whether it stays quiet through the nuisances that go in on day 6
-as injected failures. Judge it there.
+as injected failures.
+
+That test has now run and the volume baseline half passed it. It fired on 3 of 10 clean
+partitions, which is not quiet. The duration baseline failed it outright at 10 of 10 for a
+reason that turned out to be the filesystem rather than the model. Both are above.
 
 **The findings about the estimators do not depend on the generated data, and the findings
 about the seasonal key do.** That one day doubled in the history moves a mean band 45
 percent and a median band 4.3 percent is arithmetic. That volume is weekly and duration is
 not is a fact about a feed I wrote.
+
+**Figures taken from the generated data rest on an artefact nobody else has.** `data/` is
+gitignored because it is generated. That is how a wrong row count survived five days in this
+file. The rebuild command is printed above and it is verified deterministic, which lets a
+reader check any number here. What is still missing is a checked in checksum of the corpus,
+so nothing detects the corpus changing except a person re-reading the figures.
+
+**The metadata schema is create only and has no migration path.** `schema.apply` runs
+`CREATE TABLE IF NOT EXISTS`, so adding a column to `obs_run` leaves an existing database on
+the old shape and every insert then fails on the column count. Nothing has noticed because
+every run here rebuilds from scratch under `/tmp`. Acceptable for a portfolio project and
+not acceptable anywhere else. Tracked as `ot-021`.
+
+**`incident_report.py` writes its arm copies to fixed scratch paths.** A `--scratch` flag
+exists now because a previous run left files behind under a different owner and the next run
+died on `shutil.copy`. The flag is a workaround. It still does not clean up after itself.
+
+**Every monitor here is fitted once and never refitted.** A real baseline moves as the data
+moves, and this one does not. Nothing in the project claims otherwise and nothing implements
+it either. It matters more than it looks, because a band fitted on 119 days and never
+updated will drift out of usefulness on its own.
+
+**Faults are injected one per partition.** Real incidents arrive together and interact. A
+harness that only ever tests one at a time cannot say anything about how the monitors behave
+when two things break at once.
 
 **The band has no trend term, so it is fitted on a series that is drifting.** Measured
 above at 35 percent of the width on this data. The two ways out both cost something and
@@ -836,9 +1031,9 @@ The DAG comes when there is more than one task worth scheduling.
 reports zero cases fails the run, because the usual way a suite lies is not a wrong
 assertion. It is a file the runner imported and never executed.
 
-`scripts/smoke.py` covers the command line path. It generates two weeks, runs the range,
-snapshots the counts, runs the same range again and compares. Then it runs the observed
-path and holds the metadata to the warehouse. The row counts in `obs_dataset_metric` have
+`scripts/smoke.py` covers the command line path. It generates two weeks and runs the range.
+Then it snapshots the counts, runs the same range again and compares. Then it runs the
+observed path and holds the metadata to the warehouse. The row counts in `obs_dataset_metric` have
 to add up to the rows actually in `raw_orders`. Every collector unit test points it at a
 table built inside the test, so this is the only place its numbers meet a pipeline that
 really ran.
@@ -888,11 +1083,21 @@ test goes red is the only way to know a test tests anything.
 | the log band is built and read in raw space | 56/58 |
 | the volume history keeps every attempt | 52/58 |
 | the minimum observation count drops to 2, against the smoke check | exit 1, seven weekday bands from a fortnight |
+| freshness ignores events from before the partition | 39/40 |
+| freshness treats an unknown event time as clean | 38/40 |
+| `scan` returns every partition instead of only the failures | 39/40 |
+| a negative tolerance is accepted | 39/40 |
+| `late_arrival` moves no event to the prior day | inject fails, the fault stops being a fault |
+| `last_known_good` accepts a partition nothing checked | 38/40 |
+| `all_alerting` and `unjudged` collapse into one state | 39/40 |
+| `last_known_good` ignores the partition boundary | 38/40 |
+| `upstream_runs` includes the failing task's own run | 39/40 |
+| **`last_known_good` walks forward instead of back** | **survived, see below** |
 
 Five of the first twelve baseline mutants survived and three of those five shared a
-cause. The history fixture had one successful attempt per partition, so
-the rule about which attempt counts, the rule about excluding failures, and the rule about
-not double counting a retry were all passing without ever being exercised. The fixture now
+cause. The history fixture had one successful attempt per partition. So three rules were all
+passing without ever being exercised. Which attempt counts, whether failures are excluded,
+and whether a retry is double counted. The fixture now
 has a partition that failed then succeeded twice, one that only ever failed, and one that
 succeeded and then failed on a later attempt.
 
@@ -908,3 +1113,17 @@ The null count mutation is the reason this table is worth building. It passed on
 attempt. The fixture had four rows with two nulls in the column being checked, so counting
 the nulls and counting the non nulls gave the same answer. The fixture now has a column
 that is null in three rows out of four.
+
+**The day-6 survivor is the 08-02 fixture lesson repeating in a file whose own docstring
+cites it.** `last_known_good` walks a history backwards to find the most recent clean
+partition. Reversing that sort makes it return the oldest clean partition instead, which is
+a different answer to a different question, and the whole suite stayed green. The fixture
+had one clean partition in it. With a single clean candidate, forwards and backwards land on
+the same row and the direction rule never runs.
+
+The header of `tests/test_timeline.py` claims that fixture tests a rule about choosing
+between rows. It did, for the alerting rule and the unchecked rule, both of which had
+competing candidates. It did not for the direction rule. Writing the lesson at the top of the
+file is not the same as applying it to every rule in the file. The fixture now carries two
+clean partitions with different row counts, so the wrong direction returns a different date
+and a different reference value.
