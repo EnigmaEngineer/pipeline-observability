@@ -384,45 +384,57 @@ def _ordered(qmap):
     return [qmap[k] for k in sorted(qmap, key=float)]
 
 
-def signal_series(observations, probs=QUANTILE_PROBS):
-    """Candidate drift signals for one column, one value per partition.
+def signals_for(observation, ref_q, ref_s, probs=QUANTILE_PROBS):
+    """Signal values for one partition against a reference supplied from outside.
+
+    This is the function day 6 needed and days 4 and 5 did not have. `signal_series`
+    below derives its reference from the very observations it is scoring, which is
+    correct when fitting and wrong the moment a partition has to be judged that the fit
+    never saw. Without this there was no way to score a new partition at all, and the
+    day-5 holdout worked around it by taking values from a series computed over the whole
+    history while taking bands from the first 70 percent. The bands were held out and the
+    reference was not.
 
     Every signal here is a share of the partition or a shift measured in units of a
     spread, except the two distinct counts, which are included on purpose so the coupling
     check has something to refuse. Leaving them out would make `usable_signals` look like
     a formality.
     """
-    ref_q = reference_quantiles(observations)
-    ref_s = reference_shares(observations)
     scale = iqr(_ordered(ref_q), probs) if ref_q else None
-
-    series = {}
+    out = {}
     if ref_q and scale and scale > 0:
         ref_vec = _ordered(ref_q)
-        series["quantile_shift"] = [
-            max_abs_shift(ref_vec, _ordered(o["quantiles"]), scale)
-            if o.get("quantiles") else None
-            for o in observations
-        ]
-        series["ks_bound"] = [
-            ks_bound(ref_vec, _ordered(o["quantiles"]), probs)
-            if o.get("quantiles") else None
-            for o in observations
-        ]
+        quantiles = observation.get("quantiles")
+        out["quantile_shift"] = (
+            max_abs_shift(ref_vec, _ordered(quantiles), scale) if quantiles else None)
+        out["ks_bound"] = (
+            ks_bound(ref_vec, _ordered(quantiles), probs) if quantiles else None)
     if ref_s:
-        series["share_tv"] = [
-            total_variation(ref_s, shares(o["top_values"], o["row_count"]))
-            for o in observations
-        ]
-    series["null_rate"] = [null_rate(o["null_count"], o["row_count"])
-                           for o in observations]
-    series["distinct_count"] = [o["distinct_count"] for o in observations]
-    series["distinct_ratio"] = [
-        o["distinct_count"] / o["row_count"]
-        if o["distinct_count"] is not None and o["row_count"] else None
-        for o in observations
-    ]
-    return series
+        out["share_tv"] = total_variation(
+            ref_s, shares(observation["top_values"], observation["row_count"]))
+    out["null_rate"] = null_rate(observation["null_count"], observation["row_count"])
+    out["distinct_count"] = observation["distinct_count"]
+    out["distinct_ratio"] = (
+        observation["distinct_count"] / observation["row_count"]
+        if observation["distinct_count"] is not None and observation["row_count"]
+        else None)
+    return out
+
+
+def signal_series(observations, probs=QUANTILE_PROBS):
+    """Candidate drift signals for one column, one value per partition.
+
+    The reference is the elementwise median across `observations`, so this is the fitting
+    path and not the scoring path. Built on top of `signals_for` rather than beside it.
+    Two implementations of the same arithmetic drift apart and then a comparison between
+    them measures the drift instead of the thing. That is the 08-01 lesson about a hand
+    written baseline winning by 1.8x on work it was not doing.
+    """
+    ref_q = reference_quantiles(observations)
+    ref_s = reference_shares(observations)
+    per = [signals_for(o, ref_q, ref_s, probs) for o in observations]
+    names = sorted({name for row in per for name in row})
+    return {name: [row.get(name) for row in per] for name in names}
 
 
 class Monitor:
@@ -481,6 +493,17 @@ class Monitor:
     def watched(self):
         """Every signal this monitor will actually judge, banded or constant."""
         return sorted(set(self.bands) | set(self.constants))
+
+    def signals(self, observation, probs=QUANTILE_PROBS):
+        """Signal values for a partition this monitor was not fitted on.
+
+        Uses the reference stored at fit time. That is the whole point of storing it and
+        until day 6 nothing called for it, so a monitor could be fitted and then had no
+        way to score anything new. Every number in `scripts/incident_report.py` comes
+        through here.
+        """
+        return signals_for(observation, self.reference["quantiles"],
+                           self.reference["shares"], probs)
 
     def check(self, name, weekday, value):
         """Judge one signal on one partition.

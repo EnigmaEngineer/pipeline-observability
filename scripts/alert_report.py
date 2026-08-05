@@ -158,6 +158,14 @@ def holdout_fire_rates(observations_by_column, split=HOLDOUT_SPLIT):
     Splitting fixes the direction of the argument without making the number strong. The
     training half is smaller, so a signal can come out constant here that was banded
     before. That is a real difference and it is reported rather than smoothed over.
+
+    **The first version of this leaked and the leak is worth naming.** It took the bands
+    from the training half and the signal values from `signal_series(obs)` over the whole
+    history. That function derives its reference from whatever list it is handed, so the
+    reference for the held out partitions was an elementwise median that had already seen
+    them. Half of the split was held out and half was not. Corrected on 08-05 once
+    `Monitor.signals` existed, which is the function that scores a partition against the
+    reference stored at fit time.
     """
     rates = {}
     for column, obs in observations_by_column.items():
@@ -166,7 +174,9 @@ def holdout_fire_rates(observations_by_column, split=HOLDOUT_SPLIT):
         if len(train) < 14 or not test:
             continue
         monitor = drift.Monitor.fit(column, train)
-        series = drift.signal_series(obs)
+        scored = [monitor.signals(o) for o in obs]
+        series = {name: [row.get(name) for row in scored]
+                  for name in {n for row in scored for n in row}}
         for name in monitor.watched():
             values = series.get(name)
             if values is None:

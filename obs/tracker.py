@@ -101,16 +101,21 @@ def track(con, pipeline, task, partition_key=None, code_version=None,
         cold_start=cold,
     )
     store.insert_run(con, record)
+    # the clock for the duration starts here and not at `started`. everything above is
+    # the tracker doing its own bookkeeping, and on 08-05 that measured 2.8 ms against a
+    # recorded median of 30. a duration monitor learning the cost of the monitor is the
+    # thing day 2 moved the profiling queries out of this block to avoid.
+    work_began = clock()
     try:
         yield record
     except BaseException as exc:
         # BaseException on purpose. A Ctrl-C is a real way for a run to end and it should
         # leave a failed row, not a row stuck at 'running'. SIGKILL is the case nothing
         # here can reach.
-        record.finish(clock(), error=short_error(exc))
+        record.finish(clock(), error=short_error(exc), work_began=work_began)
         store.update_run(con, record)
         raise
-    record.finish(clock())
+    record.finish(clock(), work_began=work_began)
     store.update_run(con, record)
 
 

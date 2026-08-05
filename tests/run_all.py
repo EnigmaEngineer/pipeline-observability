@@ -18,6 +18,8 @@ MODULES = [
     "tests.test_baseline",
     "tests.test_drift",
     "tests.test_alerting",
+    "tests.test_inject",
+    "tests.test_timeline",
 ]
 
 
