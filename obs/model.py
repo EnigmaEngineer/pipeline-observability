@@ -64,9 +64,25 @@ class RunRecord:
     triggered_by: str = "schedule"
     cold_start: bool = False
 
-    def finish(self, ended_at, error=None):
+    def finish(self, ended_at, error=None, work_began=None):
+        """Close the run out.
+
+        `work_began` is when the task itself started, which is not the same moment as
+        `started_at`. `started_at` is when the tracker was entered and it is what
+        `stale_runs` compares against, so it has to stay where it is. The duration is
+        measured from `work_began` because everything between the two is the tracker
+        looking up an attempt number and inserting a row.
+
+        Measured on 08-05 at 2.8 ms against a recorded median of 30, so 9 percent of
+        every duration this project stored before today was its own observability. Day 2
+        moved the profiling queries out of the tracked block for exactly this reason and
+        left the run row insert inside it. Durations recorded before this change are not
+        comparable with ones recorded after, which is why the history gets rebuilt rather
+        than appended to.
+        """
         self.ended_at = ended_at
-        self.duration_ms = int((ended_at - self.started_at).total_seconds() * 1000)
+        began = work_began or self.started_at
+        self.duration_ms = int((ended_at - began).total_seconds() * 1000)
         self.status = "failed" if error else "success"
         self.error = error
         return self

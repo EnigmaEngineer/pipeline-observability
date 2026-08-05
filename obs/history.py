@@ -304,6 +304,91 @@ def column_history(con, dataset="raw_orders", column="order_amount_usd",
     return observations, skipped
 
 
+def partition_runs(con, partition_key, pipeline="orders"):
+    """Every run row for one partition. All tasks, all attempts, in start order.
+
+    Deliberately not filtered to successes or to last attempts, unlike every other
+    reader in this file. Those filters exist because a baseline is being trained and a
+    failed attempt would teach it that broken is normal. An incident timeline is the
+    opposite job. The failed attempt and the retry are the two rows a person most wants
+    to see, and hiding them here would leave the timeline describing a partition that
+    looks like it worked first time.
+    """
+    return con.execute(
+        """
+        SELECT run_id, task, partition_key, attempt, started_at, ended_at,
+               duration_ms, status, error, code_version, cold_start
+          FROM obs_run
+         WHERE pipeline = ? AND partition_key = ?
+         ORDER BY started_at, attempt
+        """,
+        [pipeline, partition_key],
+    ).fetchall()
+
+
+def partition_schema(con, partition_key, pipeline="orders"):
+    """The schema each dataset had on one partition.
+
+    Returns `{dataset: (schema_hash, column_count, first_seen_at)}` from the highest
+    attempt, because a retry that changed the shape is the shape that landed.
+    """
+    rows = con.execute(
+        """
+        SELECT m.dataset, v.schema_hash, v.column_count, v.first_seen_at, r.attempt
+          FROM obs_dataset_metric m
+          JOIN obs_run r ON r.run_id = m.run_id
+          JOIN obs_schema_version v ON v.schema_hash = m.schema_hash
+         WHERE r.pipeline = ? AND r.partition_key = ?
+         ORDER BY r.attempt
+        """,
+        [pipeline, partition_key],
+    ).fetchall()
+    out = {}
+    for dataset, schema_hash, column_count, first_seen, _attempt in rows:
+        out[dataset] = (schema_hash, column_count, first_seen)
+    return out
+
+
+def event_time_history(con, dataset="raw_orders", pipeline="orders"):
+    """The event time range stored for each partition, against the partition it landed in.
+
+    This reader is here because the columns it reads have been collected on every run
+    since day 2 and nothing has ever read them. Six days of a monitoring project storing
+    a field no monitor consults is its own small finding, and the day-6 late arrival
+    injection is exactly the fault they exist to catch. `build_daily` groups on `dt`, so
+    an event that happened on the 3rd and arrived in the 4th's file is counted on the
+    4th and no other monitor in this repo can tell.
+
+    Returns `(observations, skipped)` where an observation is a dict carrying the
+    partition date and the stored minimum and maximum event times.
+    """
+    rows = con.execute(
+        """
+        SELECT r.partition_key, r.attempt, m.event_time_min, m.event_time_max
+          FROM obs_dataset_metric m
+          JOIN obs_run r ON r.run_id = m.run_id
+         WHERE m.dataset = ? AND r.pipeline = ? AND r.status = 'success'
+         ORDER BY r.partition_key, r.attempt
+        """,
+        [dataset, pipeline],
+    ).fetchall()
+
+    best = {}
+    for row in sorted(rows, key=lambda r: r[1]):
+        best[row[0]] = row
+
+    observations = []
+    skipped = 0
+    for partition_key, _attempt, lo, hi in best.values():
+        day = partition_date(partition_key)
+        if day is None or lo is None:
+            skipped += 1
+            continue
+        observations.append({"date": day, "event_min": lo, "event_max": hi})
+    observations.sort(key=lambda o: o["date"])
+    return observations, skipped
+
+
 def _shape(rows):
     observations = []
     skipped = 0
