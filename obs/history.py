@@ -127,6 +127,130 @@ def run_order(con, pipeline="orders", task="load_raw"):
     return rows
 
 
+def cold_start_history(con, pipeline="orders", task="load_raw"):
+    """Duration per partition keyed on the cold start flag rather than on the weekday.
+
+    Same shape as the other readers so it drops straight into `fit_bands`. The point is to
+    ask whether the cold start flag earns its place as a band key the same way day 3 asked
+    it of the weekday, rather than assuming it does. On a backfill it does not, and the way
+    it fails is the interesting part. See `scripts/alert_report.py`.
+    """
+    rows = con.execute(
+        """
+        SELECT partition_key, duration_ms, attempt, cold_start
+          FROM obs_run
+         WHERE pipeline = ? AND task = ? AND status = 'success'
+               AND duration_ms IS NOT NULL
+         ORDER BY partition_key, attempt
+        """,
+        [pipeline, task],
+    ).fetchall()
+
+    best = {}
+    for row in sorted(rows, key=lambda r: r[2]):
+        best[row[0]] = row
+
+    observations = []
+    skipped = 0
+    for partition_key, duration, _attempt, cold in best.values():
+        day = partition_date(partition_key)
+        if day is None:
+            skipped += 1
+            continue
+        observations.append((bool(cold), duration, day))
+    observations.sort(key=lambda o: o[2])
+    return observations, skipped
+
+
+def coverage(con, dataset="raw_orders", pipeline="orders", expected_partitions=None):
+    """The three ways a partition can be silent, counted separately.
+
+    ot-016 opened on day 2 because `collect_into` swallows every exception, so a broken
+    collector leaves a successful run with no metric row. By day 4 that had turned into
+    three readers for which the same silence is invisible. This is the check.
+
+    The three are not equally answerable and that is the finding.
+
+    `no_dataset_metric` is a run that succeeded and wrote nothing. The metadata can see it,
+    because the run row is there and the metric row is not, so it is a real check.
+
+    `no_column_metric` is the same one level down. A dataset metric with no column rows
+    means the profile ran and the column pass did not.
+
+    `never_ran` is a partition with no run row at all, and the metadata cannot see it. A
+    table that holds one row per run has no opinion about runs that did not happen. It
+    needs an expected set from outside, which is why `expected_partitions` is an argument
+    and not a query. Passing None does not make this check pass, it makes it absent, and
+    the returned dict says which of those happened.
+
+    The first check only applies to tasks that produce this dataset, and which tasks those
+    are is read back out of the metadata. Without that scope it reports every run of every
+    other task as a silence. On this pipeline that was 119 false positives on the first
+    run, because `build_daily` writes `daily_orders` and was being asked for `raw_orders`.
+
+    That scoping has its own hole and it is worth stating rather than hiding. A task is
+    only known to produce a dataset because it once did. If the collector was broken for
+    the whole history then no task ever produced it, the producer set is empty, and this
+    check finds nothing to complain about. It catches a collector that broke. It cannot
+    catch one that never worked.
+    """
+    producers = [r[0] for r in con.execute(
+        """
+        SELECT DISTINCT r.task
+          FROM obs_dataset_metric m
+          JOIN obs_run r ON r.run_id = m.run_id
+         WHERE m.dataset = ? AND r.pipeline = ?
+        """,
+        [dataset, pipeline],
+    ).fetchall()]
+
+    no_dataset = []
+    if producers:
+        placeholders = ", ".join("?" for _ in producers)
+        no_dataset = con.execute(
+            f"""
+            SELECT r.run_id, r.partition_key
+              FROM obs_run r
+              LEFT JOIN obs_dataset_metric m
+                ON m.run_id = r.run_id AND m.dataset = ?
+             WHERE r.pipeline = ? AND r.status = 'success' AND m.run_id IS NULL
+                   AND r.task IN ({placeholders})
+             ORDER BY r.partition_key
+            """,
+            [dataset, pipeline] + producers,
+        ).fetchall()
+
+    no_column = con.execute(
+        """
+        SELECT m.run_id, r.partition_key
+          FROM obs_dataset_metric m
+          JOIN obs_run r ON r.run_id = m.run_id
+         WHERE m.dataset = ? AND r.pipeline = ? AND r.status = 'success'
+           AND NOT EXISTS (SELECT 1 FROM obs_column_metric c
+                            WHERE c.run_id = m.run_id AND c.dataset = m.dataset)
+         ORDER BY r.partition_key
+        """,
+        [dataset, pipeline],
+    ).fetchall()
+
+    seen = {r[0] for r in con.execute(
+        "SELECT DISTINCT partition_key FROM obs_run WHERE pipeline = ?", [pipeline]
+    ).fetchall()}
+
+    never_ran = None
+    if expected_partitions is not None:
+        never_ran = sorted(set(expected_partitions) - seen)
+
+    return {
+        "no_dataset_metric": no_dataset,
+        "no_column_metric": no_column,
+        "never_ran": never_ran,
+        "never_ran_checked": expected_partitions is not None,
+        "partitions_seen": len(seen),
+        "producers": sorted(producers),
+    }
+
+
 def column_history(con, dataset="raw_orders", column="order_amount_usd",
                    pipeline="orders"):
     """Per partition column metrics, from the last successful run that produced them.

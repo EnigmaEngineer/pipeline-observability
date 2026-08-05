@@ -26,14 +26,14 @@ def seeded(key, values):
 
 
 def add_run(con, run_id, partition, attempt, status, duration_ms, minute,
-            task="load_raw"):
+            task="load_raw", cold=False):
     """`minute` is separate from `attempt` on purpose. Start order and attempt order are
     not the same thing, and the first version of this fixture derived one from the other,
     which made the run_order assertion pass for a reason that was not true."""
     store.insert_run(con, RunRecord(
         run_id=run_id, pipeline="orders", task=task, partition_key=partition,
         started_at=datetime(2026, 3, 2, 9, 0, 0) + timedelta(minutes=minute),
-        status=status, attempt=attempt, duration_ms=duration_ms))
+        status=status, attempt=attempt, duration_ms=duration_ms, cold_start=cold))
 
 
 def add_metric(con, run_id, rows, dataset="raw_orders"):
@@ -250,6 +250,65 @@ def run():
          ["dt=2026-03-02", "dt=2026-03-02", "dt=2026-03-03", "dt=2026-03-05",
           "garbage"],
          "run_order keeps start order and both retries, which is where a cold start shows")
+
+    # --- coverage, which is ot-016 -------------------------------------------------
+    # Nothing above is missing a metric, so the check comes back clean on this fixture
+    # and a clean check proves nothing. r9 is the case: a run that succeeded and wrote
+    # no dataset metric, which is exactly what collect_into leaves behind when it
+    # swallows an exception.
+    cov = history.coverage(con, "raw_orders")
+    c.eq(len(cov["no_dataset_metric"]), 0, "a fixture with no gaps reports no gaps")
+    c.eq(cov["producers"], ["load_raw"],
+         "the producing task is read out of the metadata rather than assumed")
+
+    add_run(con, "r9", "dt=2026-03-06", 1, "success", 10, minute=9)
+    cov = history.coverage(con, "raw_orders")
+    c.eq([r[1] for r in cov["no_dataset_metric"]], ["dt=2026-03-06"],
+         "a successful run that wrote no dataset metric is found")
+
+    # a run of a task that never produces this dataset must not be reported. before the
+    # scoping fix this returned every build_daily run and the first real run of the
+    # report showed 119 false positives.
+    add_run(con, "r10", "dt=2026-03-06", 1, "success", 8, minute=10, task="build_daily")
+    add_metric(con, "r10", 1, dataset="daily_orders")
+    cov = history.coverage(con, "raw_orders")
+    c.eq([r[1] for r in cov["no_dataset_metric"]], ["dt=2026-03-06"],
+         "a build_daily run is not a raw_orders silence")
+    c.eq(len(history.coverage(con, "daily_orders")["no_dataset_metric"]), 0,
+         "and daily_orders is clean when asked about on its own terms")
+
+    # every dataset metric here was written without column metrics, so this is the
+    # level below and it should find all of them
+    c.ok(len(cov["no_column_metric"]) > 0, "a dataset metric with no columns is found")
+
+    # the third silence. absent unless an expected set is supplied, and the returned
+    # flag says which of those two happened so a caller cannot read a missing check as
+    # a passing one.
+    c.eq(cov["never_ran"], None, "with no expected set the third check is absent")
+    c.eq(cov["never_ran_checked"], False, "and says so rather than looking clean")
+    with_expected = history.coverage(
+        con, "raw_orders", expected_partitions=["dt=2026-03-02", "dt=2026-09-09"])
+    c.eq(with_expected["never_ran"], ["dt=2026-09-09"],
+         "a partition nothing ever ran for is only findable from outside")
+    c.eq(with_expected["never_ran_checked"], True, "and the flag flips when it is given")
+
+    # --- the cold start key, which is ot-018 ---------------------------------------
+    cold_con = store.connect()
+    add_run(cold_con, "k1", "dt=2026-03-02", 1, "success", 900, minute=1, cold=True)
+    add_run(cold_con, "k2", "dt=2026-03-03", 1, "success", 11, minute=2)
+    add_run(cold_con, "k3", "dt=2026-03-04", 1, "success", 12, minute=3)
+    cold_obs, cold_skipped = history.cold_start_history(cold_con)
+    c.eq([k for k, _, _ in cold_obs], [True, False, False],
+         "the cold flag comes back as the key, ready for fit_bands")
+    c.eq([v for _, v, _ in cold_obs], [900, 11, 12], "with the durations beside it")
+    c.eq(cold_skipped, 0, "and nothing skipped on readable keys")
+
+    # one cold observation cannot make a band, and the honest answer to a cold run is
+    # that nothing is known about it rather than that it is fine.
+    cold_bands = baseline.Baseline.fit([(k, v) for k, v, _ in cold_obs], space="log")
+    c.eq(cold_bands.check(True, 900).status, "unknown_key",
+         "a single cold observation gives no band and no verdict")
+    cold_con.close()
 
     con.close()
     return c
