@@ -1,8 +1,8 @@
 # pipeline-observability
 
 Catch a broken data pipeline before the dashboard consumers do. This repo holds a small
-orders pipeline and the run-metadata schema that watches it, with freshness, volume,
-schema and distribution monitors built on top of that metadata.
+orders pipeline and the run-metadata schema that watches it. Freshness and volume and
+schema and distribution monitors are built on top of that metadata.
 
 ```
 pip install -r requirements.txt
@@ -131,24 +131,37 @@ this section was re-measured on the day-3 run, so the timings differ a little fr
 an earlier version of this file carried. The only figures below not taken that day are the
 two `approx_quantile` ones, which are marked where they appear.
 
-Re-checked on the day-4 run rather than rewritten. Two back to back runs of
-`scripts/profile_cost.py` gave 78.6 ms and 78.8 ms for the single pass against the 79.4 ms
-below, so the timings hold to about one percent and the table stays as measured on day 3.
-The approximate distinct errors do not hold. `loaded_at` came back 15.97 percent wrong on
-day 3 and 6.72 percent wrong today on identical data, because a HyperLogLog sketch depends
-on the order rows are fed to it. That is the same order dependence that keeps
-`approx_quantile` out of the collector, and it makes the case against approximate distinct
-counts stronger rather than weaker. An error you cannot reproduce is worse than a large one
-you can.
+**Re-measured on the day-5 run and the timings moved a lot.** The sandbox itself is slower
+today, by about 1.8x across every stage. That is a fact about the machine and not about the
+code, and it is the reason the block below is dated rather than headed "measured today".
+
+**The day-4 claim about approximate distinct counts was wrong and this is the correction.**
+That run reported the `loaded_at` error at 15.97 percent on day 3 and 6.72 percent on day 4
+"on identical data" and concluded that a HyperLogLog sketch depends on the order rows reach
+it. The data was not identical. `loaded_at` is written as the wall clock time of the load,
+so its 119 values are different timestamps on every run and the sketch was being fed a
+different column each time.
+
+Re-run today, every column whose values really are identical reproduced to the last decimal
+place. `dt` came back at 39.50 percent both days. So did `order_id` at 17.92, `customer_id`
+at 20.91, `ordered_at` at 3.88, `status` at 25.00 and `item_count` at 11.11. The only row
+that moved was `loaded_at`, which is the only column that was not the same data. The
+estimator is stable and the measurement was not.
+
+The order dependence result still holds for `approx_quantile`, where it was established on
+08-01 by reading the same rows in a different physical order. It was never established for
+`approx_count_distinct`, and the errors below are large enough on their own without it.
 
 ```
-generate   254,346 events across 119 partitions               2.7 s
-pipeline   the same range with nothing watching it            2.5 s   median of 3
-observed   the same range with the collector wrapped round   11.6 s   median of 3
+2026-08-04 run, one measurement each unless stated
+generate   254,346 events across 119 partitions               5.1 s
+pipeline   the same range with nothing watching it            4.4 s
+observed   the same range with the collector wrapped round   20.4 s and 21.7 s
 collected  238 runs, 2 schema versions, 238 dataset metrics, 2261 column metrics
-tests      7 modules, 165 cases, all passing
+tests      9 modules, 304 cases, all passing
 smoke      27,629 rows over 14 partitions, unchanged after a full rerun
            14 days build no weekday band and one pooled band of 1400 to 3094
+alerts     17 alerts over 119 partitions, 14 incidents, none of them a page
 ```
 
 Collection costs 9.1 s across 238 datasets, about 38 ms each. That is 3.6x the pipeline it
@@ -158,15 +171,19 @@ that data plus a group by for each categorical column.
 
 Profiling the full `raw_orders` table, median of three after a warm up query:
 
-| approach | queries | time |
-|---|---|---|
-| single pass | 1 | 79.4 ms |
-| one query per column, same aggregates | 12 | 76.9 ms |
-| single pass, quantiles removed | 1 | 48.0 ms |
-| single pass, approximate distinct counts | 1 | 69.8 ms |
+| approach | queries | day 3 | day 5 |
+|---|---|---|---|
+| single pass | 1 | 79.4 ms | 143.7 ms |
+| one query per column, same aggregates | 12 | 76.9 ms | 140.3 ms |
+| single pass, quantiles removed | 1 | 48.0 ms | 88.3 ms |
+| single pass, approximate distinct counts | 1 | 69.8 ms | 135.6 ms |
 
-Quantiles on two numeric columns are 31.4 ms of the 79.4. They are the most expensive
-thing the collector does by a wide margin.
+Both columns are real measurements and the gap between them is the machine, not the code.
+Every row moved by about 1.8x on the same query against the same table. What did not move
+is the shape. Quantiles are 31.4 ms of the 79.4 on day 3 and 55.4 ms of the 143.7 on day 5,
+so they are 40 percent and 39 percent of the single pass. The per column split stays within
+a few percent of the single pass on both days. A ratio survives a slower machine and an
+absolute timing does not, which is the argument for quoting the ratio.
 
 `approx_count_distinct` against exact counts on the same table:
 
@@ -176,7 +193,7 @@ thing the collector does by a wide margin.
 | `customer_id` | 84,649 | 66,950 | 20.91% |
 | `ordered_at` | 249,817 | 240,131 | 3.88% |
 | `order_amount_usd` | 18,096 | 16,220 | 10.37% |
-| `loaded_at` | 119 | 138 | 15.97% |
+| `loaded_at` | 119 | 105 | 11.76% |
 | `dt` | 119 | 166 | 39.50% |
 | `status` | 4 | 3 | 25.00% |
 | `item_count` | 9 | 10 | 11.11% |
@@ -185,6 +202,10 @@ thing the collector does by a wide margin.
 Those errors are far larger than the accuracy usually quoted for HyperLogLog. They are
 reported as measured. I have not worked out why DuckDB's estimator is this far off on a
 column with 119 values and I am not going to guess at a mechanism in a README.
+
+Every row above except `loaded_at` reproduced exactly on the day-5 run. `loaded_at` is the
+load timestamp, so it is a different column every run and it is the one row here that
+should not be read as a repeated measurement.
 
 The `status` row is the one that settled it. A column with four values reported as three
 is not a tolerance a threshold can absorb, it is the appearance of a new category being
@@ -228,7 +249,7 @@ measured on is synthetic.
 metadata. Nothing in `baseline.py` imports duckdb. It takes lists of pairs, which is why
 every case below can be tested without a database.
 
-A band is a centre and a spread, widened by k, in either raw or log space, using either
+A band is a centre and a spread widened by k. It sits in raw or log space and uses either
 mean with standard deviation or median with a scaled MAD. All four combinations come out
 of the same `fit_bands` call. Building the losing side by hand is how a comparison gets
 rigged, which happened in this repo two days ago, so there is one code path and the
@@ -261,7 +282,7 @@ freedom they cost.
 
 There is a floor under this that matters more than the statistics. `duration_ms` is an
 integer. `load_raw` has a median of 11 ms, so one unit of resolution is 9.1 percent of a
-typical value. The weekday medians are 10, 11, 11, 11, 11, 11 and 12, so the largest gap
+typical value. The seven weekday medians are `10 11 11 11 11 11 12`. The largest gap
 between any two of them is two units. A weekly effect that small is not a small effect,
 it is an effect nothing here could have seen. The honest claim is not that duration has
 no weekly pattern. It is that none is detectable at this resolution, and a monitor
@@ -387,7 +408,7 @@ happened to be in it.
 
 ### What ships
 
-Volume, keyed by weekday, log space, median and MAD, three sigma:
+Volume keyed by weekday. Log space, median and MAD, three sigma:
 
 | key | n | low | centre | high | width |
 |---|---|---|---|---|---|
@@ -406,8 +427,8 @@ the false alarm rate rather than an estimate of the real one.
 
 ## Distribution drift
 
-`obs/drift.py`, `obs/history.column_history`, and `scripts/drift_report.py`, which
-measures every claim in this section. Run it with:
+`obs/drift.py` and `obs/history.column_history` and `scripts/drift_report.py`. The last of
+those measures every claim in this section. Run it with:
 
 ```
 python scripts/drift_report.py --obs-db /tmp/obs.duckdb --db /tmp/orders.duckdb \
@@ -453,8 +474,8 @@ It cannot be computed from what day 1 chose to store. Seven quantiles pin the in
 cumulative function at seven places and say nothing about the shape between them, so the
 distance can only be bounded from below. `ks_bound` does that.
 
-The gaps between the stored probabilities are 0.01, 0.04, 0.20, 0.25, 0.25, 0.20, 0.04 and
-0.01. Inside one gap both cumulative functions start and end at the same two points and are
+The gaps between the stored probabilities run `0.01 0.04 0.20 0.25 0.25 0.20 0.04 0.01`.
+Inside one gap both cumulative functions start and end at the same two points and are
 free in between, so they can separate by the whole gap while every stored quantile agrees.
 The blind spot is the largest gap, which is **0.25**.
 
@@ -538,6 +559,159 @@ column has a distribution and this schema cannot see it move.
 Every rate here is measured on the partitions the reference and the bands were fitted on,
 so they are floors on the false alarm rate rather than estimates of it. That holds until
 day 6.
+
+## Alerting
+
+`obs/alerting.py` plus `obs/history.coverage` and `obs/history.cold_start_history`. The
+report at `scripts/alert_report.py` measures every claim in this section. Run it with:
+
+```
+python scripts/alert_report.py --obs-db /tmp/obs.duckdb --chart docs/alerts.png
+```
+
+A monitor answers "is this partition unusual". An alert answers "should somebody stop what
+they are doing". Days 3 and 4 built the first thing. This is the second, and the gap
+between them turned out to be wider than the blueprint line suggested.
+
+Measured today on the same 119 partition history. Every figure below reruns.
+
+### routing to a severity is the easy half, and it is the half that does nothing
+
+The policy table is small and the asymmetries in it are the whole content. Volume falling
+is missing data and volume rising is usually a replay, so they are different events.
+A vocabulary losing a value means something upstream stopped producing it, which is worse
+than gaining one. That part was straightforward.
+
+Then the gate meant to keep noisy signals off the pager was measured and it refuses
+**nothing**. Zero of eighteen watched signals. The ten that can page are all quiet enough
+and the eight that cannot are all held back by policy rather than by the gate. It is kept,
+because the policy it guards is a table anyone can edit, and the report prints that it is
+idle so the next reader is not misled about what is protecting them.
+
+### the fire rate that approved those ten pages was a tautology
+
+Worse than idle. A signal whose history never moved is stored as a constant, and a constant
+cannot fire on the partitions that defined it. Its in sample fire rate is 0.000 because of
+how it was built, not because of anything anyone measured. Every one of the ten signals
+allowed to page was a constant.
+
+So the rate is now fitted on the first 70 percent of the history and counted on the rest.
+The two disagree on six of eighteen signals:
+
+| column | signal | in sample | out of sample |
+|---|---|---|---|
+| coupon_code | null_rate | 0.000 | 0.028 |
+| customer_id | distinct_ratio | 0.008 | 0.111 |
+| order_amount_usd | quantile_shift | 0.059 | 0.083 |
+| status | share_tv | 0.034 | 0.028 |
+| channel | share_tv | 0.008 | 0.000 |
+| coupon_code | share_tv | 0.034 | 0.000 |
+
+`coupon_code null_rate` is the case that matters. In sample it is a constant with a fire
+rate of zero and it is allowed to page. Out of sample it moves. The number that approved it
+was describing the fitting procedure and not the signal.
+
+### 238 of 255 alerts were the monitor talking about itself
+
+The first version routed an `unbanded` or `unknown_key` verdict to an `info` alert. Two
+signals on `item_count` cannot be banded, so that produced two alerts on every partition,
+forever, each one saying the same thing about the monitor rather than anything about the
+day. 238 of 255 alerts, 93 percent.
+
+Whether a band could be fitted is a fact about the monitor and not about the partition it
+was pointed at. It gets said once, at fit time, by `coverage_gaps`. After the fix the
+history produces **17 alerts** rather than 255, and the two gaps are reported once.
+
+### the cold start label exists now, and it does not justify a suppression rule
+
+Day 2 measured `load_raw`'s first run at 921 ms against a median of 11, and day 3 worked
+out that holding it inside a band needs k of 34.3. The label asked for is now written by
+the tracker into `obs_run.cold_start`, because a process boundary does not survive into the
+stored rows and cannot be recovered later from a gap in `started_at`.
+
+Suppressing on it is a different question and the answer is no. Measured today:
+
+| | |
+|---|---|
+| runs in the history | 119 |
+| marked cold | 1 |
+| cold share | 0.0084 |
+| cold median against warm median | 1711 ms against 17 ms, 100.6x |
+
+One in 119 because this history is a backfill inside one process. A daily schedule runs
+every partition in its own process, so every run there is cold and the same rule silences
+the monitor completely. The rule cannot be validated on data collected this way.
+
+Banding on the flag instead of suppressing on it fails too, and it fails honestly. One cold
+observation is below the seven a band needs, so `check(cold=True)` returns `unknown_key`.
+The monitor says it knows nothing about a cold run, which is true and useless.
+
+This is a sampling problem wearing a suppression problem's clothes. A backfill's duration
+distribution cannot train a monitor for a scheduled pipeline.
+
+### two bands, which is what ot-017 turned into
+
+The volume band fitted over the whole history is 868.2 wide. Over the last 56 partitions it
+is 564.2. A third of the wide band is the feed's own growth held as if it were spread.
+
+Day 4 moved the choice here on the grounds that alerting is the first consumer that pays
+for a band being wider than it needs to be. Having got here, the choice is a false one.
+Both bands measured over the same last 56 partitions:
+
+| band | fitted on | mean width | fire rate |
+|---|---|---|---|
+| wide | 119 partitions | 868.2 | 0.018 |
+| narrow | 56 partitions | 564.2 | 0.143 |
+
+| where the last 56 land | count |
+|---|---|
+| inside both | 47 |
+| between the two | 8 |
+| outside both | 1 |
+
+A value outside the wide band is unambiguous and it pages. A value in the middle is unusual
+against recent traffic and ordinary against the year. That is a real state, it is not an
+emergency, and it gets a ticket. The trend that made the wide band too wide is exactly what
+makes it the right line for the louder of the two.
+
+### the three silences, and only two of them are checkable
+
+`collect_into` swallows every exception, so a broken collector leaves a successful run with
+no metric row. By day 4 that was three separate readers for which the same silence was
+invisible. `history.coverage` checks it, and the three cases are not equally answerable.
+
+A successful run with no dataset metric is visible, because the run row is there and the
+metric row is not. A dataset metric with no column metrics is the same thing one level
+down. A partition nothing ever ran for is **not** visible, because a table holding one row
+per run has no opinion about runs that did not happen. It needs a list of partitions that
+should exist and that list has to come from outside, which is why `expected_partitions` is
+an argument and not a query. Passing nothing does not make the check pass, it makes it
+absent, and the returned flag says which of those happened.
+
+The first version of that check reported 119 false positives on its first real run, because
+it asked every `build_daily` run for a `raw_orders` metric it was never going to write. It
+now reads the producing tasks back out of the metadata. That scoping has its own hole. A
+task is only known to produce a dataset because it once did, so a collector that broke is
+caught and a collector that never worked is not.
+
+### suppression caps, it does not delete
+
+A window that deletes alerts means the one real incident during a deploy is gone with no
+record. A window that caps severity still writes everything down and only stops the phone
+ringing. Over a two week window on this history, 2 tickets were capped to info and nothing
+was removed.
+
+Overlapping windows take the quietest ceiling and record every reason. The first version
+took whichever window came first and stopped, and a mutant that deleted the stop survived,
+because the fixture had only ever held one window.
+
+### what ships, and what is not yet tested
+
+17 alerts across 119 partitions, collapsing into 14 incidents. **Zero of them page.** That
+is the honest state. This feed has no injected failures in it, so the severity routing, the
+grouping and the windows have all been exercised against ordinary data and none of them
+against a real incident. Grouping saves three messages here, which is not a case for it.
+Day 6 is when that gets tested.
 
 ## Known limitations
 
