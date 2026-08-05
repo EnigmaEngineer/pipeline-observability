@@ -141,9 +141,13 @@ class Band:
 class Verdict:
     key: object
     value: float
-    status: str            # ok, high, low, unbanded, unknown_key
+    status: str            # ok, high, low, unbanded, unknown_key, changed
     score: float = None
     band: Band = None
+    # What the value was compared against when there is no band. Only a constant signal
+    # sets it. Day 5 needs it because a constant that moved up and a constant that moved
+    # down are different incidents, and 'changed' on its own cannot say which.
+    expected: object = None
 
 
 def fit_bands(observations, k=DEFAULT_K, space="log", estimator="median_mad",

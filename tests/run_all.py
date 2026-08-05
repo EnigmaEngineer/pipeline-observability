@@ -17,6 +17,7 @@ MODULES = [
     "tests.test_tracker",
     "tests.test_baseline",
     "tests.test_drift",
+    "tests.test_alerting",
 ]
 
 

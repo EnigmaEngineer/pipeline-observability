@@ -166,9 +166,8 @@ def ks_bound(ref_q, obs_q, probs=QUANTILE_PROBS):
     taken at their most generous is a real separation.
 
     The first version of this assumed `F(x) = p` at `x = Q(p)`, which is true for a
-    continuous column and false the moment values repeat. On `item_count`, where the
-    stored vector is 1, 1, 1, 1, 2, 4, 6, it made two byte identical vectors bound apart
-    by 0.49. A monitor built on it would have fired on every partition of every integer
+    continuous column and false the moment values repeat. On `item_count`, whose stored
+    vector is `1 1 1 1 2 4 6`, it made two byte identical vectors bound apart by 0.49. A monitor built on it would have fired on every partition of every integer
     column forever and been unarguable, because the number was large and had a real
     theorem behind it.
 
@@ -492,7 +491,7 @@ class Monitor:
         """
         if name in self.constants:
             expected = self.constants[name]["value"]
-            return Verdict(key=None, value=value,
+            return Verdict(key=None, value=value, expected=expected,
                            status="ok" if value == expected else "changed")
         baseline = self.bands.get(name)
         if baseline is None:
