@@ -25,7 +25,7 @@ import duckdb
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from obs import baseline, drift, history  # noqa: E402
+from obs import alerting, baseline, drift, history  # noqa: E402
 
 START = "2026-03-02"
 END = "2026-03-15"
@@ -121,6 +121,7 @@ def observed(raw, tmp):
     monitor = drift.Monitor.fit("customer_id", columns_seen)
     status_seen, _ = history.column_history(obs, "raw_orders", "status")
     status_monitor = drift.Monitor.fit("status", status_seen)
+    cover = history.coverage(obs, "raw_orders")
     obs.close()
     if len(columns_seen) != days or dropped:
         return 1, (f"column history has {len(columns_seen)} observations and dropped "
@@ -131,6 +132,25 @@ def observed(raw, tmp):
     verdict = status_monitor.check("distinct_count", 0, 99)
     if verdict is None or verdict.status == "ok":
         return 1, "a new status category did not register against real metadata"
+
+    # day 5. the same verdict has to come out of the alerting layer as a ticket rather
+    # than a page, because a new category is not an emergency, and a lost one is.
+    gained = alerting.raise_alert("drift", "distinct_count", verdict, fire_rate=0.0)
+    lost = alerting.raise_alert(
+        "drift", "distinct_count",
+        status_monitor.check("distinct_count", 0, 1), fire_rate=0.0)
+    if gained is None or gained.severity != "ticket":
+        return 1, f"a new category routed to {gained and gained.severity}, not a ticket"
+    if lost is None or lost.severity != "page":
+        return 1, f"a lost category routed to {lost and lost.severity}, not a page"
+
+    # and the coverage check has to come back clean on a pipeline that just ran properly.
+    # this is the ot-016 check running against metadata something really wrote, which is
+    # where the 119 false positives showed up rather than in any unit test.
+    if cover["no_dataset_metric"] or cover["no_column_metric"]:
+        return 1, (f"coverage found {len(cover['no_dataset_metric'])} runs with no "
+                   f"dataset metric on a healthy pipeline")
+
     return 0, (f"observed ok: {runs} runs, {recorded} rows agreed with the warehouse, "
                f"{columns} column metrics. {days} days build no weekday band and one "
                f"pooled band of {pooled[None].lo:.0f} to {pooled[None].hi:.0f}. "
