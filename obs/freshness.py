@@ -6,8 +6,8 @@ existed at the time passed it. `event_time_min` and `event_time_max` have been c
 on every run since day 2 and until today nothing read them. Six days of a monitoring
 project storing a field no monitor consults.
 
-`build_daily` groups on `dt`, which is the partition the file landed in, rather than on
-`ordered_at`, which is when the event happened. So a row that happened on the 3rd and
+`build_daily` groups on `dt`, the partition the file landed in. It does not group on
+`ordered_at`, which is when the event actually happened. So a row that happened on the 3rd and
 arrived in the 4th's file is counted on the 4th, and the 3rd has already been built and
 will not be rebuilt. That is ot-015, open since day 1, and this is the half of it that
 can be answered from run metadata.

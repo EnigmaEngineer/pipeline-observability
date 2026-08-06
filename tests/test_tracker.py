@@ -1,8 +1,8 @@
 """The tracker is judged on what it leaves behind when things go wrong.
 
 A run that succeeded is easy to record. The cases that matter are the failed one, the
-retry, and the one that never came back at all, because those are the three a monitor is
-looking for and all three are invisible if the row is only written at the end.
+retry and the one that never came back at all. Those are the three a monitor looks for and
+all three are invisible if the row is only written at the end.
 """
 
 import sys

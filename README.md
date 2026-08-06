@@ -31,7 +31,19 @@ the cost of the collector measurable.
                                                      |
                                                      v
                                     drift, alerts, freshness, timeline  (done)
+                                                     |
+                                                     v
+                                      quarantine  ->  the incident view  (done)
 ```
+
+Every number this file quotes comes out of one of five scripts, named beside the section that
+quotes it. `baseline_report.py` measures the bands and `drift_report.py` the column signals.
+`alert_report.py` measures the routing. `incident_report.py` runs the injected faults and
+`worked_incidents.py` walks three of them end to end.
+
+**A figure here is only as current as the last run of the script that produces it.** That is
+not an abstract point. Two headline numbers in this file turned out to be wrong on consecutive
+days and the reason was the same both times. Nothing had rerun the thing that made them.
 
 The observability side is `obs/`. The thing being observed is `pipeline/`. They do not
 import each other and that separation is the point. `scripts/run_observed.py` is the only
@@ -178,17 +190,24 @@ The order dependence result still holds for `approx_quantile`, where it was esta
 `approx_count_distinct`, and the errors below are large enough on their own without it.
 
 ```
-2026-08-05 run, one measurement each unless stated
-generate   254,952 events across 119 partitions               5.1 s
-pipeline   the same range with nothing watching it            4.4 s
-observed   the same range with the collector wrapped round   13.2 s
+2026-08-06 run, one measurement each unless stated
+generate   254,952 events across 119 partitions, 119 of 119 byte identical to disk
+observed   the same range with the collector wrapped round   14.3 s
 collected  238 runs, 2 schema versions, 238 dataset metrics, 2261 column metrics
-tests      11 modules, 378 cases, all passing
+tests      11 modules, 427 cases, all passing
 smoke      27,629 rows over 14 partitions, unchanged after a full rerun
            14 days build no weekday band and one pooled band of 1400 to 3094
-alerts     17 alerts over 119 partitions, 14 incidents, none of them a page
+alerts     11 alerts over 119 partitions, 10 incidents, one of them a page
+volgate    volume fire rate 0.036 in sample, 0.083 held out, 0.300 on the clean arm
 incidents  10 clean and 10 injected partitions, 8 of 9 faults detected
+           6 of 9 by the monitor named beforehand
+worked     3 incidents walked end to end, 1 subject quarantined at 10 of 10
+mutants    16 of 16 killed on the code added today
 ```
+
+**Every figure in this block was regenerated on the date at the top of it.** That sentence is
+here because the previous version of this block was not, and it carried an alert count that had
+never come out of this code. The correction is in the alerting section.
 
 The `observed` figure was 20.4 s and 21.7 s on earlier runs and is 13.2 s today. The cause
 is not established. The machine itself has been measured moving by about 1.8x between days
@@ -204,19 +223,22 @@ that data plus a group by for each categorical column.
 
 Profiling the full `raw_orders` table, median of three after a warm up query:
 
-| approach | queries | day 3 | day 5 |
-|---|---|---|---|
-| single pass | 1 | 79.4 ms | 143.7 ms |
-| one query per column, same aggregates | 12 | 76.9 ms | 140.3 ms |
-| single pass, quantiles removed | 1 | 48.0 ms | 88.3 ms |
-| single pass, approximate distinct counts | 1 | 69.8 ms | 135.6 ms |
+| approach | queries | day 3 | day 5 | day 7 |
+|---|---|---|---|---|
+| single pass | 1 | 79.4 ms | 143.7 ms | 76.9 ms |
+| one query per column, same aggregates | 12 | 76.9 ms | 140.3 ms | 71.1 ms |
+| single pass, quantiles removed | 1 | 48.0 ms | 88.3 ms | 45.7 ms |
+| single pass, approximate distinct counts | 1 | 69.8 ms | 135.6 ms | 67.2 ms |
 
-Both columns are real measurements and the gap between them is the machine, not the code.
-Every row moved by about 1.8x on the same query against the same table. What did not move
-is the shape. Quantiles are 31.4 ms of the 79.4 on day 3 and 55.4 ms of the 143.7 on day 5,
-so they are 40 percent and 39 percent of the single pass. The per column split stays within
-a few percent of the single pass on both days. A ratio survives a slower machine and an
-absolute timing does not, which is the argument for quoting the ratio.
+All three columns are real measurements and the gaps between them are the machine, not the
+code. Day 5 ran about 1.8x slower than day 3 on the same query against the same table, and day
+7 is back within a few percent of day 3. So the day-5 column was not a trend, it was one slow
+day, and an absolute millisecond figure in this file is worth exactly as much as its date.
+
+The shape does not move. Quantiles are 40 percent of the single pass on day 3, 39 percent on
+day 5 and 41 percent on day 7. The per column split stays within a few percent of the single
+pass on all three. A ratio survives a slower machine and an absolute timing does not, which is
+the argument for quoting the ratio.
 
 `approx_count_distinct` against exact counts on the same table:
 
@@ -655,16 +677,62 @@ The two disagree on six of eighteen signals:
 rate of zero and it is allowed to page. Out of sample it moves. The number that approved it
 was describing the fitting procedure and not the signal.
 
-### 238 of 255 alerts were the monitor talking about itself
+### and the same fix skipped the only subject that could actually page
+
+Day 5 fixed the rate for every drift signal in the table above. It did not touch volume.
+Volume is the one entry in `POLICY` whose verdict routes to `page`, so it was the only subject
+the gate ever had to protect anyone from.
+
+The number it was reading came from a band fitted on all 119 partitions and counted on the
+last 56 of those same 119. Found on day 7, while writing the worked incidents below. Four
+estimates of one quantity:
+
+![four estimates of one fire rate](docs/volume_gate.png)
+
+| estimate | fitted on | counted on | rate | clears the 0.05 gate |
+|---|---|---|---|---|
+| in sample, shipped until day 7 | 119 | last 56 of the same 119 | 0.036 | yes |
+| held out | first 83 | the 36 it never saw | 0.083 | no |
+| the injection harness clean arm | 119 | 10 future partitions | 0.300 | no |
+| exact 95 percent lower bound on 3 of 10 | | | 0.087 | no |
+
+Only the in sample estimate passes. The last row is there because 3 of 10 is ten observations
+and a reader is entitled to say so. Inverting the binomial tail gives 0.087 as the least
+favourable rate that count is consistent with, and that fails the gate too, so the conclusion
+does not depend on taking 0.300 at face value.
+
+`obs/baseline.holdout_fire_rate` is the fix and it lives in `obs/` rather than in the report
+for a dull reason. A measurement that decides a severity has to be reachable from a test, and
+nothing in `tests/` imports a script.
+
+**The consequence is that volume no longer pages on this feed, including on the fault it was
+built for.** `truncate` is a partial day and it now arrives as a ticket. That is the correct
+outcome of an honest measurement and it is also the least comfortable sentence in this file.
+The monitor built first, and the one the project description leads with, is the one that
+turned out not to have earned a page.
+
+This is the third time the same mistake has been found here. Day 5 caught the gate approving
+constants on an in sample zero. Day 6 caught the drift holdout taking its reference from the
+whole history. Day 7 caught the one subject day 5 did not revisit. The pattern is not that
+the rule was unknown. It was written down. The pattern is that fixing it in the place you are
+looking does not fix it in the place you are not.
+
+### 238 of 249 alerts were the monitor talking about itself
 
 The first version routed an `unbanded` or `unknown_key` verdict to an `info` alert. Two
 signals on `item_count` cannot be banded. That produced two alerts on every partition and it
 would have done so forever. Each one said the same thing about the monitor rather than
-anything about the day. 238 of 255 alerts, 93 percent.
+anything about the day. 238 of 249 alerts, 95.6 percent.
 
 Whether a band could be fitted is a fact about the monitor and not about the partition it
 was pointed at. It gets said once, at fit time, by `coverage_gaps`. After the fix the
-history produces **17 alerts** rather than 255, and the two gaps are reported once.
+history produces **11 alerts** rather than 249, and the two gaps are reported once.
+
+**This paragraph said 238 of 255 and 93 percent until day 7, and that was wrong.** Both came
+off an alert count of 17 that has never reproduced. See the correction at the end of this
+section. The counterfactual is now computed by `gaps_section` from the gap count and the real
+alert count, rather than written into a sentence by hand, because a hand carried number is
+what went wrong here.
 
 ### the cold start label exists now, and it does not justify a suppression rule
 
@@ -751,11 +819,40 @@ because the fixture had only ever held one window.
 
 ### what ships, and what is not yet tested
 
-17 alerts across 119 partitions, collapsing into 14 incidents. **Zero of them page.** That
-is the honest state. This feed has no injected failures in it, so the severity routing, the
-grouping and the windows have all been exercised against ordinary data and none of them
-against a real incident. Grouping saves three messages here, which is not a case for it.
-Day 6 is when that gets tested.
+11 alerts across 119 partitions, collapsing into 10 incidents. **One of them pages.** This
+feed has no injected failures in it, so the severity routing, the grouping and the windows
+have all been exercised against ordinary data and none of them against a real incident.
+Grouping saves one message here, which is not a case for it. Day 6 is when that gets tested.
+
+### the alert counts published here for two days were never reproducible
+
+This section said **17 alerts, 14 incidents and zero pages** from day 5 until day 7. The real
+figures are 11, 10 and one page. Found on day 7 while writing the worked incidents below.
+
+The correction was checked rather than assumed, because the obvious explanation is that the
+code changed underneath the number and that explanation is wrong. Three runs, all against the
+same 119 partitions:
+
+| tree | metadata built by | alerts | incidents | pages |
+|---|---|---|---|---|
+| day 7 | day 7 | 11 | 10 | 1 |
+| day 5 `bc3cec8` | day 7 | 11 | 10 | 1 |
+| day 5 `bc3cec8` | day 5 `bc3cec8` | 11 | 10 | 1 |
+
+The third row is the one that settles it. The day-5 tree building its own metadata from the
+same raw files and running its own report gives 11. So the number that shipped was not a
+figure a later change invalidated. It never came out of this code.
+
+How it survived is the part worth keeping. `scripts/alert_report.py` was not run on day 6 at
+all. The figure was carried forward into a block dated 2026-08-05 that reads as a
+measurement taken that day. Yesterday the same thing happened to a row count. **Two headline
+numbers in two days. Both wrong, and both published under a date on which nothing regenerated
+them.** A figure is only as current as the last run of the thing that produces it. This file
+now names the script beside every section rather than only at the top.
+
+The claim that was wrong in the direction that matters is the third column. Zero pages reads
+as a safety property. One page over 119 partitions on a feed with nothing wrong in it is a
+different statement, and it is the kind a reviewer is right to ask about.
 
 ## Injected failures, and the control arm that mattered more
 
@@ -879,6 +976,211 @@ Upstream is declared rather than derived. The day-1 schema has four tables and n
 holds an edge between tasks, so anything claiming to derive a dependency graph here would be
 inferring it from names. Declared and honest beats derived and wrong.
 
+## Three worked incidents
+
+`scripts/worked_incidents.py`. Everything below reruns:
+
+```
+python scripts/worked_incidents.py --obs-db /tmp/obs.duckdb --db /tmp/wh.duckdb
+```
+
+The section above counts detections across ten faults. That answers whether the stack catches
+things. It does not answer what a person does with one alert, which is the question this
+project exists for. Three faults, picked because they fail in three different ways.
+
+Writing them up changed the shipped code twice, and both changes are the interesting part.
+
+### the incident view did not know which of its lines meant anything
+
+The first draft of the truncate example listed five alerts in severity order with nothing to
+separate them. Three of those five fire on ordinary days too. The clean arm has known that
+since day 6 and the timeline was never told, so a reader was left to invent a ranking out of
+severity alone.
+
+Every alert now carries how often its subject fires on clean partitions the fit never saw:
+
+| subject | fired on clean |
+|---|---|
+| `duration_ms` | 10 of 10 |
+| `row_count` | 3 of 10 |
+| `coupon_code null_rate` | 1 of 10 |
+| `customer_id distinct_ratio` | 1 of 10 |
+
+Unmeasured and quiet are kept apart. A subject with no clean count gets no marker rather than
+a reassuring one, because the recurring finding in this repo is that the unmeasured signal is
+the one firing nightly.
+
+### a subject that fires on every clean partition is now held out entirely
+
+`duration_ms` fired on 10 of 10. The pager gate can only make an alert quieter and quieter is
+not enough, because a subject at that rate carries nothing at any severity. It was sitting at
+`info` on every incident view in the project.
+
+`alerting.quarantine` holds it out of the stream and states it once at fit time, which is
+where `coverage_gaps` already puts facts about a monitor. The threshold is 1.0 and it is
+deliberately not tuned. The four measured clean rates leave a wide gap between 0.300 and
+1.000. Setting the line at 0.5 to sit in that gap would be choosing a threshold from the ten
+partitions it is about to be judged on. Everything under 1.0 keeps alerting and carries its
+rate instead.
+
+The reason printed is the bound rather than the raw rate. 10 of 10 licenses "at least 0.741",
+not "always".
+
+**This is containment and not a fix.** It is the day-7 answer to `ot-023` and the cost is
+below.
+
+### incident one, a partial day. the monitor works and the view still needed help
+
+```
+2026-04-30   severity ticket   4 alerts across 2 monitors
+what fired
+  ticket coupon_code null_rate            below the band   [also fires on 1 of 10 clean]
+  ticket coupon_code share_tv             above the band
+  ticket order_amount_usd quantile_shift  above the band
+  ticket row_count   below the band, held off the pager at a fire rate of 0.083
+                                          [also fires on 3 of 10 clean]
+last known good: 2026-04-29, 1 partitions back   rows 2465   28 ms
+```
+
+23 monitor verdicts, 5 alerts before quarantine and 4 after. The upstream extractor stopped at
+14:00 and the row count is below the Thursday band, which is exactly what the seasonal
+baseline was built to catch.
+
+Two things a responder can act on. The last known good partition is the day before with 2,465
+rows, so the shortfall is measurable rather than a feeling. And the fault is in the source
+file, so a rerun of a fixed extract overwrites the partition rather than doubling it, which is
+the day-1 decision to overwrite instead of append paying off in the one place it matters.
+
+The severity is the honest disappointment. This pages nobody now, because the volume band's
+out of sample fire rate does not clear the gate.
+
+### incident two, a column disappears. the monitor named for it cannot see it
+
+```
+2026-05-08   severity page   2 alerts across 1 monitors
+what fired
+  page   channel distinct_count           lost a value it had always had
+  page   channel null_rate                a value this signal had never taken
+last known good: 2026-04-29, 9 partitions back   rows 2465   28 ms
+```
+
+The schema monitor is the one `pipeline/inject.py` named for this fault and it fired nothing.
+Both hashes came back identical across the clean and dropped arms.
+
+`pipeline/orders.py` declares its column list rather than inferring it. That was a day-1
+decision, made so a null heavy day could not silently retype a column, and this is what it
+costs. A column that vanishes upstream arrives as a column full of nulls. `channel` was null
+on 2,858 of 2,858 rows and the schema hash never moved, because the schema is observed after
+the load and the load is the thing that normalises the loss away.
+
+The null rate monitor caught it at page severity, so the stack notices. A responder reading
+only the monitor name goes to the wrong place. The real lesson is architectural. **A schema
+check sitting behind a declared column list cannot see an upstream drop, and the fix is to
+profile the source rather than the landed table.** Not built.
+
+The nine partitions back is the timeline earning its place. Every day between here and
+2026-04-29 alerted, so it walked past eight of them to find a reference value that was both
+checked and clean.
+
+### incident three, late arrival. detected, and this repo cannot repair it
+
+```
+2026-05-07   severity page   3 alerts across 3 monitors
+what fired
+  page   event_time range                 events reach 1 days before this partition
+  ticket customer_id distinct_ratio       below the band   [also fires on 1 of 10 clean]
+  ticket row_count                        above the band   [also fires on 3 of 10 clean]
+last known good: 2026-04-29, 8 partitions back   rows 2465   28 ms
+```
+
+A quarter of the previous day's events land in today's file. `obs/freshness.py` reads
+`event_time_min`, which has been collected on every run since day 2 and which nothing read
+until day 6, and it pages.
+
+Detection is the easy half. `daily_orders` groups on `dt`, the partition the file arrived in,
+and not on `ordered_at`. So those rows are counted on the wrong day, the day they belong to
+has already been built, and nothing rebuilds it. **The alert is correct and there is no
+action behind it.** Restating the affected day needs a watermark and a restatement window, and
+neither exists here.
+
+That is `ot-015` and the day-7 decision on it is below.
+
+## The three open threads day 7 closes, and how
+
+### ot-023, duration is not comparable across filesystems
+
+Day 6 measured the same 30 partitions read off the mounted folder and off `/tmp`, byte
+identical under `filecmp`, and got a 3.4x gap. Re-measured on day 7 at 2.379x on 58
+observations per side with the cold run of each pass dropped. The ratio is unstable across
+days and its sign is not.
+
+Three ways out were named. One of them was never a candidate and that was worth finding out.
+
+**Normalising to milliseconds per thousand rows cannot work, and no measurement was needed to
+know it.** The gap was measured on identical files, so the row counts on both sides are the
+same numbers. Dividing both medians by the same row count leaves the ratio where it was.
+Measured anyway rather than argued: 2.379x raw against 2.482x per thousand rows on the same 58
+observations per side, with the row counts asserted equal across the arms.
+
+**Refitting per environment is correct and it is not a repair.** It makes the band a property
+of the pipeline plus its storage and says so. It cannot be validated here, because there is
+one machine and the two filesystems on it are the mount and `/tmp`.
+
+**What ships is the quarantine.** The subject fired on 10 of 10 clean out of sample partitions
+and is held out of the alert stream with the reason stated once. Duration is still collected,
+still banded and still visible in the reports. It does not reach a person.
+
+The cost is stated rather than hidden. A real duration regression on this pipeline is now
+invisible to the alert stream, and the thing standing between that and a page was already only
+an `info` line nobody could distinguish from the ten before it.
+
+### ot-021, the metadata schema is create only
+
+`schema.apply` runs `CREATE TABLE IF NOT EXISTS`, so a database created before a column was
+added keeps the old shape and the create is a no-op. Adding `cold_start` on day 5 would have
+hit this on any database that already existed. Nothing noticed because every run here rebuilds
+from scratch under `/tmp`.
+
+A real migration path is a version row and an ALTER ladder. That is a day of work and it is not
+what this project demonstrates, so it is not here.
+
+`schema.check_shape` is here instead. It compares the live column list against the DDL this
+module ships, in order, and raises naming the missing column. `apply` calls it after the
+create, so a fresh database passes trivially and an old one fails at the point of the problem
+rather than four frames later on an insert with a parameter count mismatch.
+
+The expected list is parsed back out of the DDL rather than written a second time, because two
+declarations of the same thing drift and then the check compares the schema against the stale
+copy. The order matters here specifically. The schema hash is order sensitive on purpose,
+since a column reorder breaks a positional load, so a reorder has to fail this check too. A
+mutant comparing the two lists as sets survived the first version of the tests, because the
+fixture only ever removed a column.
+
+### ot-015, the restatement window
+
+The pipeline groups on the partition date. Late rows are counted on the wrong day and nothing
+rebuilds the day they belong to. Freshness detects it at page severity as of day 6.
+
+**No window ships, and the reason is that this feed cannot supply one.** A restatement window
+is a claim about how late an upstream can be. Freshness over the 119 clean training partitions
+returns 0 partitions outside their own day, so the observed lag distribution here is empty.
+Picking three days would be picking a number nobody measured and putting it in a place that
+looks measured, which is the specific failure this project is built to avoid.
+
+What that leaves is a shape rather than a value. The window is a property of the upstream and
+it has to come from whoever owns the extract, the same way `expected_partitions` on the
+coverage check is an argument rather than a query. Freshness already reports the observed lag
+per partition, which is the input such a decision needs. Building the watermark and the
+rebuild before there is a number to configure it with would be building the easy half.
+
+### ot-024, every monitor is fitted once and never refitted
+
+Not closed and not built. It is the gap a senior reviewer asks about first and it is named in
+the limitations. Worth being precise about why it was not done rather than listing it. A
+refitting schedule needs a rule for what to do when the new fit disagrees with the old one on
+a partition already judged, and that is a design question this project has not earned an answer
+to on a feed with no real drift in it.
+
 ## Known limitations
 
 **The source data is generated, and its weekly shape is assumed rather than observed.**
@@ -910,11 +1212,11 @@ file. The rebuild command is printed above and it is verified deterministic, whi
 reader check any number here. What is still missing is a checked in checksum of the corpus,
 so nothing detects the corpus changing except a person re-reading the figures.
 
-**The metadata schema is create only and has no migration path.** `schema.apply` runs
-`CREATE TABLE IF NOT EXISTS`, so adding a column to `obs_run` leaves an existing database on
-the old shape and every insert then fails on the column count. Nothing has noticed because
-every run here rebuilds from scratch under `/tmp`. Acceptable for a portfolio project and
-not acceptable anywhere else. Tracked as `ot-021`.
+**The metadata schema is create only and still has no migration path.** `schema.check_shape`
+now raises at the point of the problem instead of letting an insert fail on a column count
+four frames later, which is the day-7 answer to `ot-021`. It refuses to run against a database
+of the wrong shape. It does not migrate one, so an existing database has to be rebuilt or
+altered by hand.
 
 **`incident_report.py` writes its arm copies to fixed scratch paths.** A `--scratch` flag
 exists now because a previous run left files behind under a different owner and the next run
@@ -983,10 +1285,16 @@ marked and refuse to judge, which is safe, and it does mean a robust estimator o
 low resolution data can produce no baseline at all rather than a bad one.
 
 **`daily_orders` groups on the partition date, not on `ordered_at`.** An event that
-happened on the 3rd and landed in the 4th's file is counted on the 4th. The generator
-never does that, so the pipeline is correct here only because its source is well behaved.
-That is the single most likely place a real feed would break this, and late arrival is on
-the day-6 list of injected failures.
+happened on the 3rd and landed in the 4th's file is counted on the 4th. Freshness detects it
+at page severity and nothing repairs it, because a restatement needs a watermark and a
+window and neither is here. The window is not chosen, and the reason it is not chosen is that
+this feed has never been late, so there is no observed lag to pick one from. That is `ot-015`
+and the argument is above.
+
+**A real duration regression will not reach anyone.** `duration_ms` is quarantined, because it
+fired on 10 of 10 clean out of sample partitions for a reason that turned out to be the
+filesystem the input sat on. It is still collected and still banded and it does not alert.
+Refitting per environment is the correct answer and it cannot be validated on one machine.
 
 **A collector failure leaves a gap, and a gap is ambiguous.** `collect_into` catches
 everything, because the pipeline should not fall over when the thing watching it does.
@@ -1093,6 +1401,22 @@ test goes red is the only way to know a test tests anything.
 | `last_known_good` ignores the partition boundary | 38/40 |
 | `upstream_runs` includes the failing task's own run | 39/40 |
 | **`last_known_good` walks forward instead of back** | **survived, see below** |
+| the quarantine threshold accepts a rate at the limit | 82/82, nothing is ever held out |
+| the quarantine divides by a zero observation count | crashes on an unmeasured subject |
+| the fire rate bound returns the raw rate instead | 81/82, 10 of 10 reports 1.000 |
+| the bound's bisection compares the tail the wrong way | 81/82 |
+| `raise_alert` ignores the quarantine flag | 81/82 |
+| an unmeasured subject is reported as quiet | 48/49 |
+| `noise_note` keeps a zero observation count | 48/49 |
+| the render drops the clean rate marker | 47/49 |
+| `check_shape` prints instead of raising | 18/21 |
+| `check_shape` compares the two lists as sets | **survived, then killed by a reorder fixture** |
+| `check_shape` treats a missing table as a mismatch | 20/21 |
+| `expected_columns` keeps the constraint lines | 17/21 |
+| `apply` skips the shape check | 20/21 |
+| `holdout_fire_rate` fits on the whole series | 79/80 |
+| `holdout_fire_rate` counts on the training half | 79/80 |
+| `holdout_fire_rate` accepts too little training history | 79/80 |
 
 Five of the first twelve baseline mutants survived and three of those five shared a
 cause. The history fixture had one successful attempt per partition. So three rules were all
@@ -1127,3 +1451,13 @@ competing candidates. It did not for the direction rule. Writing the lesson at t
 file is not the same as applying it to every rule in the file. The fixture now carries two
 clean partitions with different row counts, so the wrong direction returns a different date
 and a different reference value.
+
+**The day-7 survivor is the same lesson a third time.** `check_shape` compares the live column
+list against the shipped one in order, because a column reorder breaks a positional load and is
+a real incident. A mutant comparing them as sets passed the whole suite. The fixture only ever
+removed a column, so the ordering rule never ran. Fixed with a table holding exactly the right
+columns in the wrong order, and the mutant dies.
+
+Two fixtures, two days apart, both of which tested one of the rules in the function they were
+pointed at and looked like they tested all of them. The tell in both cases is a fixture that
+can only produce one candidate for a rule about choosing between candidates.
