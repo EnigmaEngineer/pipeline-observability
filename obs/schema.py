@@ -136,10 +136,77 @@ def ddl(dialect="duckdb"):
     return [sql.format(**types).strip() for _, sql in TABLES]
 
 
+def expected_columns():
+    """Column names per table, parsed back out of the DDL this module ships.
+
+    Parsed rather than listed a second time. A hand written list beside the DDL is two
+    declarations of the same thing and they drift, and then the check compares the schema
+    against the stale copy instead of against what gets created.
+    """
+    wanted = {}
+    for name, sql in TABLES:
+        columns = []
+        body = sql.split("(", 1)[1]
+        for line in body.splitlines():
+            line = line.strip().rstrip(",")
+            if not line or line.startswith(")"):
+                continue
+            first = line.split()[0].upper()
+            if first in ("PRIMARY", "FOREIGN", "UNIQUE", "REFERENCES", "CHECK"):
+                continue
+            columns.append(line.split()[0])
+        wanted[name] = columns
+    return wanted
+
+
+def check_shape(con):
+    """Raise if an existing metadata database does not match the DDL in this file.
+
+    `ot-021`, decided on day 7. `apply` runs CREATE TABLE IF NOT EXISTS, so a database
+    created before a column was added keeps the old shape and the create is a no-op. The
+    first thing that notices is an INSERT failing on a column count, several layers away
+    from the cause, with a message about parameters rather than about migrations.
+
+    A real migration path is a version row and an ALTER ladder. That is a day of work and
+    it is not what this project is demonstrating, so it is not here. What is here is the
+    difference between failing at the point of the problem and failing four frames later.
+    Adding `cold_start` on day 5 would have hit this on any database that already existed,
+    and nothing noticed because every run rebuilds from scratch under /tmp.
+
+    Returns the tables it checked, so a caller cannot mistake a skipped check for a pass.
+    """
+    checked = []
+    for table, wanted in expected_columns().items():
+        rows = con.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = ?"
+            " ORDER BY ordinal_position",
+            [table],
+        ).fetchall()
+        if not rows:
+            continue
+        have = [r[0] for r in rows]
+        if have != wanted:
+            missing = [c for c in wanted if c not in have]
+            extra = [c for c in have if c not in wanted]
+            raise RuntimeError(
+                f"{table} in this database does not match the shipped DDL. "
+                f"missing {missing or 'nothing'}, unexpected {extra or 'nothing'}. "
+                "this schema is create only and has no migration path, so an existing "
+                "database has to be rebuilt or altered by hand. see ot-021 in the README."
+            )
+        checked.append(table)
+    return checked
+
+
 def apply(con, dialect="duckdb"):
-    """Create the metadata tables if they are not there. Safe to call every run."""
+    """Create the metadata tables if they are not there, then check the shape.
+
+    The check runs after the create so a fresh database passes it trivially and an old one
+    fails it loudly. Ordering it the other way would make every first run raise.
+    """
     for statement in ddl(dialect):
         con.execute(statement)
+    check_shape(con)
     return TABLE_NAMES
 
 

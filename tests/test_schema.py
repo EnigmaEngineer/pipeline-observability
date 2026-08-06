@@ -128,6 +128,64 @@ def run():
     c.ok(not any("{" in s for s in sf), "no unsubstituted placeholders in snowflake ddl")
     c.raises(ValueError, lambda: schema.ddl("bigquery"), "unknown dialect is rejected")
 
+    # ot-021, decided day 7. the expected column list is parsed back out of the DDL rather
+    # than written twice, so the first thing to check is that the parse agrees with what
+    # the database actually got. a parser that dropped a column would make check_shape
+    # raise on a fresh database, and a parser that kept the constraint lines would make it
+    # raise on every database forever.
+    wanted = schema.expected_columns()
+    c.eq(sorted(wanted), sorted(schema.TABLE_NAMES), "every table is parsed")
+    for table in schema.TABLE_NAMES:
+        actual = [name for name, _ in store.columns_of(con, table)]
+        c.eq(wanted[table], actual, f"{table} parses to exactly the columns created")
+    c.ok("PRIMARY" not in " ".join(wanted["obs_column_metric"]),
+         "constraint lines are not mistaken for columns")
+
+    c.eq(sorted(schema.check_shape(con)), sorted(schema.TABLE_NAMES),
+         "a database built from this DDL passes and says what it checked")
+
+    # the real case. a database created before cold_start was added keeps the old shape,
+    # because CREATE TABLE IF NOT EXISTS is a no-op against it. building that state here
+    # by stripping the column out of the shipped DDL, so the fixture cannot drift from
+    # what the module says.
+    old = duckdb.connect(":memory:")
+    stripped = "\n".join(line for line in schema.ddl("duckdb")[0].splitlines()
+                         if "cold_start" not in line)
+    c.ok("cold_start" not in stripped, "the fixture really removed the column")
+    old.execute(stripped)
+    c.raises_message(RuntimeError, "cold_start", lambda: schema.check_shape(old),
+                     "an old shaped table raises and names the missing column")
+    c.raises_message(RuntimeError, "ot-021", lambda: schema.apply(old),
+                     "apply raises too, so no caller can reach an insert on it")
+    old.close()
+
+    # a reorder holds the same columns and is still a different table, and this project has
+    # a specific reason to care. the schema hash is order sensitive on purpose, because a
+    # column reorder breaks a positional load. a mutant comparing the two lists as sets
+    # survived the first version of these tests, because a fixture that only ever removed a
+    # column never exercised the ordering rule. same shape as the 08-02 fixture lesson.
+    shuffled = duckdb.connect(":memory:")
+    shuffled.execute(
+        "CREATE TABLE obs_schema_version (dataset VARCHAR, schema_hash VARCHAR, "
+        "columns_json VARCHAR, column_count INTEGER, first_seen_at TIMESTAMP)")
+    have = [n for n, _ in store.columns_of(shuffled, "obs_schema_version")]
+    c.eq(sorted(have), sorted(schema.expected_columns()["obs_schema_version"]),
+         "the reordered fixture holds exactly the right columns as a set")
+    c.ok(have != schema.expected_columns()["obs_schema_version"],
+         "and really is in a different order, so the case is live")
+    c.raises_message(RuntimeError, "obs_schema_version",
+                     lambda: schema.check_shape(shuffled),
+                     "a reordered table is rejected even though no column is missing")
+    shuffled.close()
+
+    # a table this schema has never heard of is not this schema's problem, and a database
+    # holding none of these tables has nothing to check rather than something wrong.
+    empty = duckdb.connect(":memory:")
+    c.eq(schema.check_shape(empty), [], "an empty database checks nothing")
+    empty.execute("CREATE TABLE unrelated (x INTEGER)")
+    c.eq(schema.check_shape(empty), [], "and an unrelated table is ignored")
+    empty.close()
+
     return c
 
 
