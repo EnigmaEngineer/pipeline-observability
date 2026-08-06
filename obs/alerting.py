@@ -35,6 +35,7 @@ no logic in it.
 
 from dataclasses import dataclass, field
 from datetime import date
+from math import comb
 from typing import Optional
 
 # Most urgent first. Comparisons go through `rank` rather than through the strings,
@@ -141,6 +142,72 @@ DEFAULT_POLICY = {"high": "ticket", "low": "ticket",
 # Statuses that mean the monitor declined to judge. No policy entry can promote these.
 CANNOT_JUDGE = ("unbanded", "unknown_key")
 
+# A subject that fired on every clean partition the fit never saw is not a monitor. The
+# page gate above can only make an alert quieter, and quieter is not enough here, because
+# such a subject carries nothing at any severity. Day 6 measured `duration_ms` firing on 10
+# of 10 clean out of sample partitions at `info`, which put a meaningless line on every
+# incident view in the project.
+#
+# The threshold is 1.0 and that is deliberately not a tuned number. The measured clean
+# rates on this feed are 1.000 for duration and 0.300, 0.100 and 0.100 for the other three
+# subjects that fire at all. Setting the line at 0.5 because those leave a gap would be
+# choosing a threshold from the ten partitions it is about to be judged on, which is the
+# day-3 mistake wearing new clothes. Everything below 1.0 keeps alerting and carries its
+# measured rate instead.
+QUARANTINE_FIRE_RATE = 1.0
+
+
+def fire_rate_lower_bound(fired, observed, alpha=0.05):
+    """Exact one sided lower bound on a fire rate, by inverting the binomial tail.
+
+    Ten partitions is a small sample and every out of sample rate in this project rests on
+    one. Printing 10 of 10 as 1.000 invites a reader to treat it as certainty, and printing
+    3 of 10 as 0.300 invites the opposite mistake, which is dismissing it as too few
+    observations to act on. The bound answers both. At 10 of 10 it is 0.741. At 3 of 10 it
+    is 0.087, which is still above `MAX_PAGE_FIRE_RATE`, so a subject at that count fails
+    the pager gate on the least favourable reading of its own evidence.
+
+    Clopper Pearson, found by bisection rather than by a beta quantile, because that keeps
+    this module on the standard library. Checked against the closed form for the all fired
+    case, where the bound is alpha to the power one over n, in `tests/test_alerting.py`.
+    """
+    if not observed or fired <= 0:
+        return 0.0
+    lo, hi = 0.0, 1.0
+    for _ in range(200):
+        mid = (lo + hi) / 2.0
+        tail = sum(comb(observed, i) * mid ** i * (1.0 - mid) ** (observed - i)
+                   for i in range(fired, observed + 1))
+        if tail > alpha:
+            hi = mid
+        else:
+            lo = mid
+    return lo
+
+
+def quarantine(clean_counts, limit=QUARANTINE_FIRE_RATE):
+    """Subjects held out of the alert stream entirely, mapped to the reason.
+
+    `clean_counts` maps a subject to `(fired, observed)` measured on clean partitions the
+    fit never saw. The return goes where `coverage_gaps` goes, because both are facts about
+    a monitor rather than about any partition, and the 08-04 lesson is that a fact about a
+    monitor gets stated once at fit time.
+
+    This does not fix a quarantined subject. It stops it lying every day. `ot-023` is the
+    live example and the README says what the real fixes would cost.
+    """
+    held = {}
+    for subject, (fired, observed) in sorted(clean_counts.items()):
+        if not observed:
+            continue
+        rate = fired / observed
+        if rate < limit:
+            continue
+        bound = fire_rate_lower_bound(fired, observed)
+        held[subject] = (f"fired on {fired} of {observed} clean partitions the fit never "
+                         f"saw, so its true rate is at least {bound:.3f}")
+    return held
+
 
 def coverage_gaps(watched, judge):
     """Signals a monitor holds and cannot judge, reported once rather than every day.
@@ -222,12 +289,18 @@ REASONS = {
 
 
 def raise_alert(monitor, signal, verdict, partition=None, fire_rate=None,
-                subject=None, limit=MAX_PAGE_FIRE_RATE):
+                subject=None, limit=MAX_PAGE_FIRE_RATE, quarantined=False):
     """One verdict to at most one alert.
 
     Returns None when the verdict was fine and also when the monitor could not judge it.
     The second case is not an alert and `coverage_gaps` is where it goes instead.
+
+    `quarantined` is the third way to get None back and it is the day-7 addition. The
+    caller decides it with `quarantine` above, because that needs a clean arm to measure
+    against and this function only ever sees one verdict.
     """
+    if quarantined:
+        return None
     if verdict is not None and verdict.status in CANNOT_JUDGE:
         return None
     severity = severity_for(monitor, signal, verdict, fire_rate, limit)

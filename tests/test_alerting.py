@@ -197,4 +197,42 @@ def run():
     every = alerting.cold_start_cost([1, 2], [True, True])
     c.eq(every["share"], 1.0, "a schedule where every run is cold reports 1.0")
 
+    # the day-7 quarantine. the bound is checked against the closed form first, because the
+    # bisection is the part that could be quietly wrong and the closed form is exact for
+    # the all fired case. a bisection that returned its own starting point would pass a
+    # test that only asserted "between 0 and 1".
+    for n in (5, 10, 25):
+        c.ok(abs(alerting.fire_rate_lower_bound(n, n) - 0.05 ** (1.0 / n)) < 1e-9,
+             f"all fired at n={n} matches the closed form")
+    c.eq(round(alerting.fire_rate_lower_bound(3, 10), 4), 0.0873,
+         "3 of 10 bounds at 0.0873, which still fails the pager gate")
+    c.ok(alerting.fire_rate_lower_bound(3, 10) > alerting.MAX_PAGE_FIRE_RATE,
+         "and that is the comparison the volume decision rests on")
+    c.eq(round(alerting.fire_rate_lower_bound(1, 10), 4), 0.0051,
+         "1 of 10 bounds below the gate, so a quiet subject is not condemned")
+    c.eq(alerting.fire_rate_lower_bound(0, 10), 0.0, "nothing fired bounds at zero")
+    c.eq(alerting.fire_rate_lower_bound(5, 0), 0.0, "no observations bounds at zero")
+    c.ok(alerting.fire_rate_lower_bound(6, 10) > alerting.fire_rate_lower_bound(3, 10),
+         "the bound rises with the count, which a stuck bisection would not do")
+
+    held = alerting.quarantine({"duration_ms": (10, 10), "row_count": (3, 10),
+                                "never": (0, 10), "uncounted": (4, 0)})
+    c.eq(sorted(held), ["duration_ms"], "only the subject that fired on every clean one")
+    c.ok("10 of 10" in held["duration_ms"], "the reason carries the raw count")
+    c.ok("0.741" in held["duration_ms"], "and the bound rather than a bare 1.000")
+    c.eq(alerting.quarantine({"row_count": (9, 10)}), {},
+         "nine of ten is not quarantined, because the threshold is not tuned to a gap")
+    c.eq(alerting.quarantine({"anything": (5, 0)}), {},
+         "a subject with no observations is unmeasured rather than clean")
+
+    # quarantine has to beat the policy, the same way CANNOT_JUDGE does. asserting the
+    # None rather than the severity, because a subject held out produces no alert at all.
+    low = v("low", value=1.0, expected=10.0)
+    c.ok(alerting.raise_alert("volume", "row_count", low, partition=DAY,
+                              fire_rate=0.0) is not None,
+         "the same verdict does alert when it is not quarantined")
+    c.eq(alerting.raise_alert("volume", "row_count", low, partition=DAY, fire_rate=0.0,
+                              quarantined=True), None,
+         "a quarantined subject raises nothing whatever the policy says")
+
     return c
