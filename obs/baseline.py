@@ -234,6 +234,42 @@ class Baseline:
         return counts, (fired / total if total else 0.0)
 
 
+HOLDOUT_SPLIT = 0.7
+MIN_HOLDOUT_TRAIN = 14
+
+
+def holdout_fire_rate(observations, split=HOLDOUT_SPLIT, min_train=MIN_HOLDOUT_TRAIN,
+                      **fit_kwargs):
+    """Fit on the front of a series and count fires on the back of it.
+
+    `observations` are `(key, value, date)` triples in order, the shape `history` returns.
+    Returns `(counts, rate, n_train, n_test)`, or None when there is not enough history to
+    split. Returning None rather than a rate matters, because `page_eligible` refuses an
+    unknown rate and would silently approve a zero.
+
+    **This exists because the number `page_eligible` was reading for volume was in sample
+    until day 7.** Day 5 established that the gate needs an out of sample rate, fixed every
+    drift signal, and left volume alone. Volume is the only subject the policy lets page. The
+    band was fitted on all 119 partitions and counted on the last 56 of those same 119, which
+    reads 0.036 and clears the 0.05 limit. Split properly at 83 and 36 it reads 0.083 and does
+    not, and on the ten unseen partitions of the injection harness it is 0.300. So the one
+    estimate that approved a page was the only one measured on partitions the fit had seen.
+
+    It lives here rather than in `scripts/alert_report.py` for a duller reason. A measurement
+    that decides a severity has to be reachable by a test, and nothing in `tests/` imports a
+    script.
+    """
+    if not observations:
+        return None
+    cut = int(len(observations) * split)
+    train, test = observations[:cut], observations[cut:]
+    if len(train) < min_train or not test:
+        return None
+    band = Baseline.fit([(k, v) for k, v, _ in train], **fit_kwargs)
+    counts, rate = band.fire_rate([(k, v) for k, v, _ in test])
+    return counts, rate, len(train), len(test)
+
+
 def variance_explained(observations):
     """Fraction of the variance in the values that the key accounts for.
 

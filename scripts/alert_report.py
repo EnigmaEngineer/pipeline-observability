@@ -5,13 +5,16 @@ number the README quotes about alerting comes out of here.
 
     python scripts/alert_report.py --obs-db /tmp/obs.duckdb --chart docs/alerts.png
 
-Seven sections. Four of them exist because an open thread came due today and the answer
-was not the one the thread expected.
+Eight sections. Four of them exist because an open thread came due on day 5 and the answer
+was not the one the thread expected. The volume gate section was added on day 7, after the
+worked incidents showed that the one subject allowed to page was approved on an in sample
+rate that day 5 had fixed everywhere else.
 
     coverage    the three ways a partition can be silent, and which of them are checkable
     cold        the cold start label, and why it does not become a suppression rule
     twoband     the wide volume band against the narrow one, which is ot-017
     pager       which signals are quiet enough to page, measured out of sample
+    volgate     the same question asked of volume, which day 5 missed
     gaps        signals no band could be fitted for, said once instead of daily
     severity    every partition in the history routed, counted by severity
     windows     what a suppression window costs when it caps instead of deleting
@@ -29,7 +32,7 @@ import duckdb
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from obs import alerting, drift, history  # noqa: E402
-from obs.baseline import Baseline  # noqa: E402
+from obs.baseline import Baseline, holdout_fire_rate  # noqa: E402
 
 WATCHED = ["order_amount_usd", "item_count", "coupon_code", "status", "channel",
            "customer_id"]
@@ -145,6 +148,19 @@ def two_band_section(con, pipeline, dataset, window):
 HOLDOUT_SPLIT = 0.7
 
 
+def holdout_volume_fire_rate(volume_obs, split=HOLDOUT_SPLIT):
+    """The rate the pager gate should have been reading for volume all along.
+
+    A thin wrapper over `baseline.holdout_fire_rate`, kept so both reports call one name.
+    The argument for it and the numbers are in that function's docstring.
+    """
+    # imported as a bare name rather than through the module, because `cold_section` in
+    # this file already binds `baseline` to a fitted Baseline instance and a module import
+    # under the same name is a trap waiting for whoever edits that function next.
+    split_result = holdout_fire_rate(volume_obs, split=split)
+    return None if split_result is None else split_result[1]
+
+
 def holdout_fire_rates(observations_by_column, split=HOLDOUT_SPLIT):
     """Fire rate per signal, fitted on the first part of the history and counted on the
     rest.
@@ -230,11 +246,49 @@ def pager_section(monitors, in_sample, out_sample):
     return eligible, total, binds
 
 
-def gaps_section(monitors, observations_by_column):
+def volume_gate_section(volume_obs, window=NARROW_WINDOW):
+    """The subject this gate was actually protecting, and the rate it was reading.
+
+    Day 5 built the section above and fixed the rate for every drift signal. Volume was
+    left on an in sample number and volume is the only subject in `POLICY` that can page.
+    """
+    print("\n== volume gate: the one subject that can page, and the rate that approved it ==")
+    if len(volume_obs) < window + 7:
+        print("not enough volume history")
+        return None
+    wide = Baseline.fit(history.keyed(volume_obs))
+    _, in_sample = wide.fire_rate(history.keyed(history.recent(volume_obs, window)))
+    split = holdout_fire_rate(volume_obs)
+    print(f"{'estimate':<44}{'rate':>7}  pages")
+    rows = [(f"in sample, fitted on {len(volume_obs)} counted on last {window}", in_sample)]
+    if split is not None:
+        _counts, out_rate, n_train, n_test = split
+        rows.append((f"held out, fitted on {n_train} counted on {n_test}", out_rate))
+    for label, rate in rows:
+        print(f"{label:<44}{rate:>7.3f}  "
+              f"{'yes' if alerting.page_eligible(rate) else 'no'}")
+    print()
+    print("only the in sample estimate clears the gate. the exact lower bound on the ten")
+    print("partition figure the injection harness measures, 3 of 10, is "
+          f"{alerting.fire_rate_lower_bound(3, 10):.3f}, which")
+    print("fails it as well, so the conclusion does not rest on ten observations being")
+    print("taken at face value. volume stops paging on this feed and that is correct.")
+    return {"in_sample": in_sample,
+            "out_sample": None if split is None else split[1]}
+
+
+def gaps_section(monitors, observations_by_column, real_alerts=None):
+    """Signals held and not judged, plus what routing them to `info` would have cost.
+
+    **The cost used to be a hardcoded sentence and the sentence was wrong.** It said 238 of
+    255, which was arithmetic carried by hand off an alert count of 17 that has never
+    reproduced. The real count on this history is 11, so the counterfactual is 238 of 249.
+    Computed here from the gaps and the alert count for exactly that reason. A number a
+    report derives cannot drift away from the report.
+    """
     print("\n== gaps: signals held but not judged, said once instead of every day ==")
-    print("routing these to an info alert produced 238 of 255 alerts on the first run,")
-    print("two per partition forever, each one the monitor describing itself. whether a")
-    print("band could be fitted is a fact about the monitor and not about the partition.")
+    print("whether a band could be fitted is a fact about the monitor and not about the")
+    print("partition it was pointed at, so it is stated once here rather than as an alert.")
     total = 0
     for column in sorted(monitors):
         monitor = monitors[column]
@@ -253,6 +307,14 @@ def gaps_section(monitors, observations_by_column):
             print(f"  {column:<18}{name:<17}{status}")
             total += 1
     print(f"\n{total} signals are watched and cannot be judged")
+    partitions = len(next(iter(observations_by_column.values()))) if monitors else 0
+    if total and partitions and real_alerts is not None:
+        noise = total * partitions
+        would_be = noise + real_alerts
+        print(f"routing them to an info alert instead would produce {noise} alerts on top")
+        print(f"of the {real_alerts} real ones, so {noise} of {would_be} alerts, "
+              f"{noise / would_be * 100:.1f} percent,")
+        print("would be the monitor restating the same fact about itself every day.")
     return total
 
 
@@ -387,6 +449,9 @@ def main():
     coverage_section(con, args.dataset, expected)
     cold_section(con, args.pipeline, args.task)
     two_band = two_band_section(con, args.pipeline, args.dataset, args.window)
+    # read before the connection is closed below. the first version of the volume gate
+    # section read it afterwards and died on a closed connection.
+    volume_obs, _ = history.volume_history(con, args.dataset, args.pipeline)
 
     observations_by_column, series_by_column, monitors, fire_rates = {}, {}, {}, {}
     for column in WATCHED:
@@ -413,8 +478,11 @@ def main():
 
     out_sample = holdout_fire_rates(observations_by_column)
     pager_section(monitors, fire_rates, out_sample)
-    gaps_section(monitors, observations_by_column)
+    volume_gate_section(volume_obs, args.window)
+    # built before the gaps section, because the counterfactual that section prints needs
+    # the real alert count and the old version of it carried that number by hand.
     alerts = build_alerts(monitors, series_by_column, observations_by_column, out_sample)
+    gaps_section(monitors, observations_by_column, real_alerts=len(alerts))
     partitions = len(next(iter(observations_by_column.values())))
     severity_section(alerts, partitions)
 

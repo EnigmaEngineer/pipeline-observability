@@ -2,9 +2,9 @@
 
 Fit quality is not tested here and that is on purpose. The source feed is generated, so a
 band that fits it well has recovered a shape that was handed to it. What can be tested is
-behaviour: that a contaminated history does not widen the band, that a band with no width
-says so instead of firing on everything, that a key with no band is a different answer
-from a value inside one, and that the history reader counts what it drops.
+behaviour. A contaminated history must not widen the band. A band with no width has to say
+so rather than fire on everything. A key with no band is a different answer from a value
+inside one. And the history reader has to count what it drops.
 """
 
 import sys
@@ -309,6 +309,42 @@ def run():
     c.eq(cold_bands.check(True, 900).status, "unknown_key",
          "a single cold observation gives no band and no verdict")
     cold_con.close()
+
+    # holdout_fire_rate, the day-7 fix to the number the pager gate reads for volume. the
+    # fixture is a quiet front half and a back half that steps well outside it, so an
+    # implementation that fitted on everything would report a much lower rate than one that
+    # fitted on the front only. a fixture whose two halves looked alike could not tell them
+    # apart, which is the 08-02 lesson pointed at a split rather than at a group.
+    from datetime import date as _date
+    quiet = [(None, 100.0 + (i % 5), _date(2026, 1, 1) + timedelta(days=i))
+             for i in range(70)]
+    loud = [(None, 900.0, _date(2026, 3, 12) + timedelta(days=i)) for i in range(30)]
+    series = quiet + loud
+    split = baseline.holdout_fire_rate(series)
+    c.ok(split is not None, "a long enough series can be split")
+    counts, rate, n_train, n_test = split
+    c.eq((n_train, n_test), (70, 30), "the split lands where the fraction says")
+    c.eq(rate, 1.0, "every held out observation is outside a band fitted on the quiet half")
+    c.eq(counts["high"], 30, "and every one of them is high rather than merely counted")
+
+    # the mutant worth killing is a fit over the whole series rather than over the training
+    # half, so the fixture has to make those two disagree. under median and MAD they do not,
+    # because thirty loud values out of a hundred leave the median alone and the band tight,
+    # so both report 1.0 and the mutant survives. Under mean and standard deviation the loud
+    # half drags the band out far enough to cover itself, which is the same contamination
+    # effect day 3 measured on the doubled day. That is the pair that separates them.
+    pulled = baseline.holdout_fire_rate(series, estimator="mean_sd")
+    c.eq(pulled[1], 1.0, "held out, the loud half is still outside the quiet half's band")
+    whole = baseline.Baseline.fit([(k, v) for k, v, _ in series], estimator="mean_sd")
+    _, in_sample = whole.fire_rate([(k, v) for k, v, _ in series[70:]])
+    c.eq(in_sample, 0.0,
+         "fitted on everything the same band covers the loud half, which is the actual bug")
+
+    c.eq(baseline.holdout_fire_rate([]), None, "an empty series cannot be split")
+    c.eq(baseline.holdout_fire_rate(series[:15]), None,
+         "too little training history returns None rather than a rate off four points")
+    c.eq(baseline.holdout_fire_rate(series, split=1.0), None,
+         "a split leaving no test set returns None rather than a rate over nothing")
 
     con.close()
     return c

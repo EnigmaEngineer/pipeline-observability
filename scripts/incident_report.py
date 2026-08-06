@@ -96,10 +96,18 @@ def fit_everything(base_con, window=NARROW_WINDOW):
 
     schema = history.partition_schema(
         base_con, f"dt={volume_obs[-1][2].isoformat()}", PIPELINE)
-    _, wide_rate = wide.fire_rate(history.keyed(history.recent(volume_obs, window)))
+
+    # The rate the gate gets has to be out of sample, and until day 7 volume's was not. The
+    # old line here fitted the band on all 119 partitions and counted it on the last 56 of
+    # those same 119, which reads 0.036 and clears the 0.05 limit. Held out properly it is
+    # 0.083 and it does not. Day 5 made this fix for every drift signal and volume was the
+    # one it missed, which is also the only subject in the project policy allows to page.
+    in_sample = wide.fire_rate(history.keyed(history.recent(volume_obs, window)))[1]
+    wide_rate = alert_report.holdout_volume_fire_rate(volume_obs)
 
     return {"wide": wide, "narrow": narrow, "duration": duration,
             "monitors": monitors, "schema": schema, "volume_fire_rate": wide_rate,
+            "volume_rate_in_sample": in_sample,
             "fire_rates": fire_rates, "last_clean": volume_obs[-1][2],
             "volume_obs": volume_obs}
 
