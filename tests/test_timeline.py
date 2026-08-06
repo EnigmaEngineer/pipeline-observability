@@ -2,12 +2,12 @@
 
 The rule doing most of the work here is the one from 08-02 about fixtures. A fixture with
 one row per group cannot test a rule about choosing between rows. `last_known_good` picks
-one partition out of a history under three competing conditions, so the history below has
-a clean partition, an alerting partition and an unchecked partition in it, arranged so
+one partition out of a history under three competing conditions. So the history below holds
+a clean partition, an alerting partition and an unchecked partition. They are arranged so
 that taking the wrong one gives a different answer.
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from obs import freshness
 from obs import timeline as tl
@@ -159,6 +159,36 @@ def run_tests():
     ])
     c.eq(len(scanned), 1, "scan returns only the partitions that are not clean")
     c.eq(scanned[0].partition, D, "and it returns the right one")
+
+    # the day-7 clean rate annotation. three subjects on purpose. one measured noisy, one
+    # measured quiet and one absent entirely. the rule that matters is that an absent count
+    # is not treated as a quiet one, and a fixture holding only a noisy subject would pass
+    # whether or not that distinction existed.
+    noisy = alert(subject="duration_ms", severity="info")
+    quiet = alert(subject="channel null_rate", severity="page")
+    unknown = alert(subject="brand new signal", severity="ticket")
+    rates = {"duration_ms": (10, 10), "channel null_rate": (1, 10),
+             "counted but empty": (0, 0)}
+    built = tl.assemble(Incident(partition=D, alerts=[noisy, quiet, unknown]),
+                        [mkrun()], {}, {}, {D - timedelta(days=1): entry()},
+                        clean_rates=rates)
+    c.eq(built.noise_note(noisy), (10, 10), "a measured noisy subject reports its count")
+    c.eq(built.noise_note(quiet), (1, 10), "a measured quiet subject reports its count")
+    c.eq(built.noise_note(unknown), None, "an unmeasured subject reports nothing")
+    c.eq(built.noise_note(alert(subject="counted but empty")), None,
+         "zero observations is unmeasured rather than a rate of zero")
+
+    text = tl.render(built)
+    c.ok("also fires on 10 of 10 clean" in text, "the noisy line is marked in the render")
+    c.ok("also fires on 1 of 10 clean" in text, "and so is the quiet one, with its count")
+    c.eq(text.count("also fires on"), 2,
+         "the unmeasured subject gets no marker, so a reader cannot read silence as quiet")
+
+    bare = tl.assemble(Incident(partition=D, alerts=[noisy]),
+                       [mkrun()], {}, {}, {})
+    c.eq(bare.clean_rates, {}, "no rates passed leaves the mapping empty")
+    c.ok("also fires on" not in tl.render(bare),
+         "and nothing is claimed about a subject nobody counted")
 
     return c
 

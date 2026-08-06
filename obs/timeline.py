@@ -116,6 +116,12 @@ class Timeline:
     schema: list = field(default_factory=list)
     last_good: Optional[LastGood] = None
     notes: list = field(default_factory=list)
+    # subject -> (fired, observed) on clean partitions the fit never saw. Day 7. Writing
+    # the three worked incidents made the hole obvious. A timeline listing five alerts
+    # with nothing to separate them hands an on call engineer a ranking they have to
+    # invent, and on this feed three of those five fire on ordinary days as well. The
+    # control arm has known that since day 6 and the incident view was never told.
+    clean_rates: dict = field(default_factory=dict)
 
     @property
     def failed_runs(self):
@@ -124,6 +130,21 @@ class Timeline:
     @property
     def monitors(self):
         return sorted({a.monitor for a in self.alerts})
+
+    def noise_note(self, alert):
+        """How often this alert's subject fires on clean data, or None if unmeasured.
+
+        Unmeasured and quiet are different answers and they are not collapsed. A subject
+        with no clean count is one nobody has checked, which the rest of this project has
+        found is reliably the one that fires nightly.
+        """
+        counted = self.clean_rates.get(alert.subject)
+        if counted is None:
+            return None
+        fired, observed = counted
+        if not observed:
+            return None
+        return fired, observed
 
 
 def last_known_good(partition, judged):
@@ -208,11 +229,14 @@ def schema_facts(current, previous=None):
 
 
 def assemble(incident, runs, current_schema, previous_schema, judged,
-             task_graph=None):
+             task_graph=None, clean_rates=None):
     """Everything a person needs about one incident, in one object.
 
     `incident` is an `alerting.Incident`. `runs` are the `Run` records for that
     partition, all tasks and all attempts, in start order.
+
+    `clean_rates` maps a subject to `(fired, observed)` on clean partitions the fit never
+    saw. Optional, and an absent one is not treated as a quiet one.
     """
     timeline = Timeline(
         partition=incident.partition,
@@ -222,6 +246,7 @@ def assemble(incident, runs, current_schema, previous_schema, judged,
         upstream=upstream_runs(runs, task_graph),
         schema=schema_facts(current_schema, previous_schema),
         last_good=last_known_good(incident.partition, judged),
+        clean_rates=dict(clean_rates or {}),
     )
     for note in _notes(timeline):
         timeline.notes.append(note)
@@ -274,6 +299,10 @@ def render(timeline, width=78):
     out.append("what fired")
     for alert in sorted(timeline.alerts, key=lambda a: (a.severity, a.subject)):
         suffix = f"   [capped by {alert.suppressed_by}]" if alert.suppressed_by else ""
+        counted = timeline.noise_note(alert)
+        if counted:
+            fired, observed = counted
+            suffix += f"   [also fires on {fired} of {observed} clean]"
         # padded to a width the longest real subject fits in, with a space after it
         # regardless. a subject wider than the column ran straight into the reason and
         # produced "quantile_shiftabove the band" in the first run of this.
