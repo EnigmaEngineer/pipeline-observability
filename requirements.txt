@@ -1,1 +1,19 @@
 duckdb==1.5.5
+
+# matplotlib is imported by five scripts under scripts/ and was declared nowhere until
+# 2026-08-08. duckdb has no runtime dependencies of its own, checked against the PyPI
+# metadata for 1.5.5, so a clean install of the line above brings in nothing else and
+# those five scripts had nothing to import.
+#
+# Four of the five import it unguarded. Three of those were confirmed raising ImportError
+# with matplotlib hidden, and scripts/gate_chart.py returned early on the test arguments
+# before it reached its own import line. scripts/drift_report.py is the only one that
+# guards the import and says it is skipping the chart.
+#
+# It went unnoticed for two reasons. matplotlib is already present in the sandbox this
+# project was built in, and no CI job here runs a chart script.
+#
+# The pin is the version that sandbox reports, checked on 2026-07-31 and again on
+# 2026-08-08. It is not a record of what produced any particular chart, because the version
+# was never captured at the time a chart was written.
+matplotlib==3.10.9
