@@ -177,13 +177,14 @@ it. The data was not identical. `loaded_at` is written as the wall clock time of
 so its 119 values are different timestamps on every run and the sketch was being fed a
 different column each time.
 
-The conclusion stands and the evidence behind it has been replaced. The old version rested
-on two runs agreeing on a row count that no longer reproduces, so it is not something a
-reader can check. The replacement test is stronger anyway. Build the same table two ways in
-one session, once one partition at a time through the loader and once as a single glob read, and
-compare. Those are genuinely different physical orders. All ten stable columns returned the
-same approximate count under both. `loaded_at` was the only one that moved and it is the only
-column that is not the same data twice. The estimator is stable and the measurement was not.
+The conclusion stands and the evidence behind it has been replaced. The old version
+rested on two runs agreeing on a row count that no longer reproduces, so it is not
+something a reader can check. The replacement test is stronger anyway. Build the same
+table two ways in one session, once one partition at a time through the loader and once
+as a single glob read, and compare. Those are genuinely different physical orders. All
+ten stable columns returned the same approximate count under both. `loaded_at` was the
+only one that moved and it is the only column that is not the same data twice. The
+estimator is stable and the measurement was not.
 
 The order dependence result still holds for `approx_quantile`, where it was established by
 reading the same rows in a different physical order. It was never established for
@@ -205,9 +206,10 @@ worked     3 incidents walked end to end, 1 subject quarantined at 10 of 10
 mutants    16 of 16 killed on the code added today
 ```
 
-**Every figure in this block was regenerated on the date at the top of it.** That sentence is
-here because the previous version of this block was not, and it carried an alert count that had
-never come out of this code. The correction is in the alerting section.
+**Every figure in this block was regenerated on the date at the top of it.** That
+sentence is here because the previous version of this block was not, and it carried an
+alert count that had never come out of this code. The correction is in the alerting
+section.
 
 The `observed` figure was 20.4 s and 21.7 s on earlier runs and is 13.2 s today. The cause
 is not established. The machine itself has been measured moving by about 1.8x between days
@@ -637,9 +639,9 @@ report at `scripts/alert_report.py` measures every claim in this section. Run it
 python scripts/alert_report.py --obs-db /tmp/obs.duckdb --chart docs/alerts.png
 ```
 
-A monitor answers "is this partition unusual". An alert answers "should somebody stop what
-they are doing". The baselines and the drift check are the first thing. This is the second, and the gap
-between them turned out to be wider than I expected.
+A monitor answers "is this partition unusual". An alert answers "should somebody stop
+what they are doing". The baselines and the drift check are the first thing. This is the
+second, and the gap between them turned out to be wider than I expected.
 
 Measured today on the same 119 partition history. Every figure below reruns.
 
@@ -848,11 +850,12 @@ same raw files and running its own report gives 11. So the number that shipped w
 figure a later change invalidated. It never came out of this code.
 
 How it survived is the part worth keeping. I never re-ran `scripts/alert_report.py`. The
-figure got carried forward into a block that reads like it was measured alongside everything
-around it. A row count in this file was wrong for the same reason. **Two headline numbers, both
-wrong, and both published in a block where nothing had regenerated them.** A figure is only
-as current as the last run of the thing that produces it. This file
-now names the script beside every section rather than only at the top.
+figure got carried forward into a block that reads like it was measured alongside
+everything around it. A row count in this file was wrong for the same reason. **Two
+headline numbers, both wrong, and both published in a block where nothing had
+regenerated them.** A figure is only as current as the last run of the thing that
+produces it. This file now names the script beside every section rather than only at the
+top.
 
 The claim that was wrong in the direction that matters is the third column. Zero pages reads
 as a safety property. One page over 119 partitions on a feed with nothing wrong in it is a
@@ -935,8 +938,8 @@ project has recorded included the cost of writing the row that records it. Measu
 against a recorded median of 30, which is 9 percent.
 
 The profiling queries had already been moved out of the tracked block for exactly this
-reason, and the run row insert was left inside it. The fix is a second clock read. **Durations recorded before
-this change and after it are not comparable.**
+reason, and the run row insert was left inside it. The fix is a second clock read.
+**Durations recorded before this change and after it are not comparable.**
 
 ### the holdout leaked its own reference
 
@@ -977,9 +980,9 @@ alerts it raised. The schema in force at the time. The last known good partition
 It imports no duckdb and takes rows from `obs/history.py`, so it is a view rather than a
 second query layer.
 
-Upstream is declared rather than derived. The metadata schema has four tables and none of
-them holds an edge between tasks, so anything claiming to derive a dependency graph here would be
-inferring it from names. Declared and honest beats derived and wrong.
+Upstream is declared rather than derived. The metadata schema has four tables and none
+of them holds an edge between tasks, so anything claiming to derive a dependency graph
+here would be inferring it from names. Declared and honest beats derived and wrong.
 
 ## Three worked incidents
 
@@ -1031,8 +1034,8 @@ rate instead.
 The reason printed is the bound rather than the raw rate. 10 of 10 licenses "at least 0.741",
 not "always".
 
-**This is containment and not a fix.** It is the answer I took to the filesystem problem and the
-cost is below.
+**This is containment and not a fix.** It is the answer I took to the filesystem problem
+and the cost is below.
 
 ### incident one, a partial day. the monitor works and the view still needed help
 
@@ -1073,10 +1076,11 @@ The schema monitor is the one `pipeline/inject.py` named for this fault and it f
 Both hashes came back identical across the clean and dropped arms.
 
 `pipeline/orders.py` declares its column list rather than inferring it. That was a
-deliberate choice, made so a null heavy day could not silently retype a column, and this is what it
-costs. A column that vanishes upstream arrives as a column full of nulls. `channel` was null
-on 2,858 of 2,858 rows and the schema hash never moved, because the schema is observed after
-the load and the load is the thing that normalises the loss away.
+deliberate choice, made so a null heavy day could not silently retype a column, and this
+is what it costs. A column that vanishes upstream arrives as a column full of nulls.
+`channel` was null on 2,858 of 2,858 rows and the schema hash never moved, because the
+schema is observed after the load and the load is the thing that normalises the loss
+away.
 
 The null rate monitor caught it at page severity, so the stack notices. A responder reading
 only the monitor name goes to the wrong place. The real lesson is architectural. **A schema
@@ -1146,8 +1150,8 @@ added keeps the old shape and the create is a no-op. Adding `cold_start` would h
 on any database that already existed. Nothing noticed, because every run here rebuilds from
 scratch under `/tmp`.
 
-A real migration path is a version row and an ALTER ladder. That is a day of work and it is not
-what this project demonstrates, so it is not here.
+A real migration path is a version row and an ALTER ladder. That is a day of work and it
+is not what this project demonstrates, so it is not here.
 
 `schema.check_shape` is here instead. It compares the live column list against the DDL this
 module ships, in order, and raises naming the missing column. `apply` calls it after the
@@ -1180,11 +1184,11 @@ rebuild before there is a number to configure it with would be building the easy
 
 ### every monitor is fitted once and never refitted
 
-Not closed and not built. It is the gap a senior reviewer asks about first and it is named in
-the limitations. Worth being precise about why it was not done rather than listing it. A
-refitting schedule needs a rule for what to do when the new fit disagrees with the old one on
-a partition already judged, and that is a design question this project has not earned an answer
-to on a feed with no real drift in it.
+Not closed and not built. It is the gap a senior reviewer asks about first and it is
+named in the limitations. Worth being precise about why it was not done rather than
+listing it. A refitting schedule needs a rule for what to do when the new fit disagrees
+with the old one on a partition already judged, and that is a design question this
+project has not earned an answer to on a feed with no real drift in it.
 
 ## Known limitations
 
@@ -1291,11 +1295,11 @@ marked and refuse to judge, which is safe, and it does mean a robust estimator o
 low resolution data can produce no baseline at all rather than a bad one.
 
 **`daily_orders` groups on the partition date, not on `ordered_at`.** An event that
-happened on the 3rd and landed in the 4th's file is counted on the 4th. Freshness detects it
-at page severity and nothing repairs it, because a restatement needs a watermark and a
-window and neither is here. The window is not chosen, and the reason it is not chosen is that
-this feed has never been late, so there is no observed lag to pick one from. That is the restatement problem
-and the argument is above.
+happened on the 3rd and landed in the 4th's file is counted on the 4th. Freshness
+detects it at page severity and nothing repairs it, because a restatement needs a
+watermark and a window and neither is here. The window is not chosen, and the reason it
+is not chosen is that this feed has never been late, so there is no observed lag to pick
+one from. That is the restatement problem and the argument is above.
 
 **A real duration regression will not reach anyone.** `duration_ms` is quarantined, because it
 fired on 10 of 10 clean out of sample partitions for a reason that turned out to be the
@@ -1304,9 +1308,9 @@ Refitting per environment is the correct answer and it cannot be validated on on
 
 **A collector failure leaves a gap, and a gap is ambiguous.** `collect_into` catches
 everything, because the pipeline should not fall over when the thing watching it does.
-What is left behind is a successful run with no dataset metric row. The alerting layer can
-fire on that. What it cannot do is tell a broken collector apart from a dataset nobody pointed the
-collector at, and both look like silence.
+What is left behind is a successful run with no dataset metric row. The alerting layer
+can fire on that. What it cannot do is tell a broken collector apart from a dataset
+nobody pointed the collector at, and both look like silence.
 
 **`next_attempt` scans `obs_run` on every run start.** There is no index, so the cost
 grows with the history rather than staying flat. At 238 rows it is invisible. At ten
@@ -1345,12 +1349,12 @@ The DAG comes when there is more than one task worth scheduling.
 reports zero cases fails the run, because the usual way a suite lies is not a wrong
 assertion. It is a file the runner imported and never executed.
 
-`scripts/smoke.py` covers the command line path. It generates two weeks and runs the range.
-Then it snapshots the counts, runs the same range again and compares. Then it runs the
-observed path and holds the metadata to the warehouse. The row counts in `obs_dataset_metric` have
-to add up to the rows actually in `raw_orders`. Every collector unit test points it at a
-table built inside the test, so this is the only place its numbers meet a pipeline that
-really ran.
+`scripts/smoke.py` covers the command line path. It generates two weeks and runs the
+range. Then it snapshots the counts, runs the same range again and compares. Then it
+runs the observed path and holds the metadata to the warehouse. The row counts in
+`obs_dataset_metric` have to add up to the rows actually in `raw_orders`. Every
+collector unit test points it at a table built inside the test, so this is the only
+place its numbers meet a pipeline that really ran.
 
 Every check here was falsified before it was kept. Reverting the fix and confirming the
 test goes red is the only way to know a test tests anything.
@@ -1458,12 +1462,13 @@ file is not the same as applying it to every rule in the file. The fixture now c
 clean partitions with different row counts, so the wrong direction returns a different date
 and a different reference value.
 
-**Then it happened a third time.** `check_shape` compares the live column
-list against the shipped one in order, because a column reorder breaks a positional load and is
-a real incident. A mutant comparing them as sets passed the whole suite. The fixture only ever
-removed a column, so the ordering rule never ran. Fixed with a table holding exactly the right
-columns in the wrong order, and the mutant dies.
+**Then it happened a third time.** `check_shape` compares the live column list against
+the shipped one in order, because a column reorder breaks a positional load and is a
+real incident. A mutant comparing them as sets passed the whole suite. The fixture only
+ever removed a column, so the ordering rule never ran. Fixed with a table holding
+exactly the right columns in the wrong order, and the mutant dies.
 
-Two fixtures, found weeks apart, both of which tested one of the rules in the function they were
-pointed at and looked like they tested all of them. The tell in both cases is a fixture that
-can only produce one candidate for a rule about choosing between candidates.
+Two fixtures, found weeks apart, both of which tested one of the rules in the function
+they were pointed at and looked like they tested all of them. The tell in both cases is
+a fixture that can only produce one candidate for a rule about choosing between
+candidates.
