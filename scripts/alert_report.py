@@ -1,20 +1,20 @@
 """Measure what the alerting layer actually does, rather than asserting it in a README.
 
-Same job `baseline_report.py` does for day 3 and `drift_report.py` does for day 4. Every
+Same job `baseline_report.py` does for the baselines and `drift_report.py` does for drift. Every
 number the README quotes about alerting comes out of here.
 
     python scripts/alert_report.py --obs-db /tmp/obs.duckdb --chart docs/alerts.png
 
-Eight sections. Four of them exist because an open thread came due on day 5 and the answer
-was not the one the thread expected. The volume gate section was added on day 7, after the
+Eight sections. Four of them exist because a loose end came due and the answer
+was not the one the thread expected. The volume gate section came last, after the
 worked incidents showed that the one subject allowed to page was approved on an in sample
-rate that day 5 had fixed everywhere else.
+rate that had been fixed everywhere else.
 
     coverage    the three ways a partition can be silent, and which of them are checkable
     cold        the cold start label, and why it does not become a suppression rule
-    twoband     the wide volume band against the narrow one, which is ot-017
+    twoband     the wide volume band against the narrow one
     pager       which signals are quiet enough to page, measured out of sample
-    volgate     the same question asked of volume, which day 5 missed
+    volgate     the same question asked of volume, which the first pass missed
     gaps        signals no band could be fitted for, said once instead of daily
     severity    every partition in the history routed, counted by severity
     windows     what a suppression window costs when it caps instead of deleting
@@ -37,8 +37,8 @@ from obs.baseline import Baseline, holdout_fire_rate  # noqa: E402
 WATCHED = ["order_amount_usd", "item_count", "coupon_code", "status", "channel",
            "customer_id"]
 
-# The trailing window ot-017 measured the volume band over. 56 partitions is eight weeks,
-# which is eight observations per weekday key. Day 3 recorded that eight per key estimates
+# The trailing window the volume band was measured over. 56 partitions is eight weeks,
+# which is eight observations per weekday key. The baseline work recorded that eight per key estimates
 # a spread badly and that is exactly why this is the narrow band and not the only band.
 NARROW_WINDOW = 56
 
@@ -68,7 +68,7 @@ def coverage_section(con, dataset, expected):
 
 
 def cold_section(con, pipeline, task):
-    print("\n== cold: the label ot-018 asked for, and the rule it does not justify ==")
+    print("\n== cold: the label the duration monitor wants, and the rule it does not justify ==")
     obs, skipped = history.cold_start_history(con, pipeline, task)
     if not obs:
         print("no duration history")
@@ -88,7 +88,7 @@ def cold_section(con, pipeline, task):
               f"warm median {st.median(warm_values):.0f} ms   "
               f"ratio {st.median(cold_values) / st.median(warm_values):.1f}x")
 
-    # ask of the cold flag exactly what day 3 asked of the weekday. does it earn a band.
+    # ask of the cold flag exactly what was asked of the weekday. does it earn a band.
     keyed = [(f, v) for f, v, _ in obs]
     baseline = Baseline.fit(keyed, space="log")
     print(f"bands fitted on the cold flag: {sorted(baseline.bands)}")
@@ -106,7 +106,7 @@ def cold_section(con, pipeline, task):
 
 
 def two_band_section(con, pipeline, dataset, window):
-    print("\n== twoband: ot-017, the wide volume band against the narrow one ==")
+    print("\n== twoband: the wide volume band against the narrow one ==")
     obs, _ = history.volume_history(con, dataset, pipeline)
     if len(obs) < window + 7:
         print("not enough volume history")
@@ -249,7 +249,7 @@ def pager_section(monitors, in_sample, out_sample):
 def volume_gate_section(volume_obs, window=NARROW_WINDOW):
     """The subject this gate was actually protecting, and the rate it was reading.
 
-    Day 5 built the section above and fixed the rate for every drift signal. Volume was
+    The section above fixed the rate for every drift signal. Volume was
     left on an in sample number and volume is the only subject in `POLICY` that can page.
     """
     print("\n== volume gate: the one subject that can page, and the rate that approved it ==")
@@ -393,7 +393,7 @@ def incidents_section(alerts):
           "much of a case for it. this")
     print("feed has no injected failures in it, so nothing has yet moved more than two")
     print("signals at once. the argument for grouping is that one upstream change moves")
-    print("several, and that argument is untested until day 6 puts a real failure in.")
+    print("several, and that argument is untested until a real failure goes in.")
     return incidents
 
 

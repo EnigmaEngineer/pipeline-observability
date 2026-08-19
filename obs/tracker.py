@@ -13,7 +13,7 @@ monitor can act on.
 Two costs, both real. It is two writes per run instead of one. And a row can sit at
 'running' forever, because the one failure mode that cannot be caught here is the one
 where the process stops existing. `stale_runs` is how those get found, and choosing the
-cutoff is a day-5 problem since it depends on what the pipeline's normal duration is.
+cutoff belongs to the alerting layer since it depends on what the pipeline's normal duration is.
 
 The tracker also marks the first attempt at each (pipeline, task) in a process as a cold
 start. That belongs here and nowhere else, because process boundaries do not survive into
@@ -104,7 +104,7 @@ def track(con, pipeline, task, partition_key=None, code_version=None,
     # the clock for the duration starts here and not at `started`. everything above is
     # the tracker doing its own bookkeeping, and on 08-05 that measured 2.8 ms against a
     # recorded median of 30. a duration monitor learning the cost of the monitor is the
-    # thing day 2 moved the profiling queries out of this block to avoid.
+    # thing the profiling queries were moved out of this block to avoid.
     work_began = clock()
     try:
         yield record
@@ -124,7 +124,7 @@ def stale_runs(con, older_than_minutes=60, as_of=None):
 
     This is the query that the insert-first ordering exists to make possible. The cutoff
     is an argument rather than a constant because it depends on what normal looks like
-    for a given task, and that is not known until the day-3 duration baseline exists.
+    for a given task, and that is not known until the duration baseline exists.
     """
     as_of = as_of or now_utc()
     cutoff = as_of - timedelta(minutes=older_than_minutes)

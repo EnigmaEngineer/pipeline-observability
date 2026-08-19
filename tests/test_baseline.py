@@ -251,7 +251,7 @@ def run():
           "garbage"],
          "run_order keeps start order and both retries, which is where a cold start shows")
 
-    # --- coverage, which is ot-016 -------------------------------------------------
+    # --- coverage ---------------------------------------------------------------
     # Nothing above is missing a metric, so the check comes back clean on this fixture
     # and a clean check proves nothing. r9 is the case: a run that succeeded and wrote
     # no dataset metric, which is exactly what collect_into leaves behind when it
@@ -292,7 +292,7 @@ def run():
          "a partition nothing ever ran for is only findable from outside")
     c.eq(with_expected["never_ran_checked"], True, "and the flag flips when it is given")
 
-    # --- the cold start key, which is ot-018 ---------------------------------------
+    # --- the cold start key ------------------------------------------------------
     cold_con = store.connect()
     add_run(cold_con, "k1", "dt=2026-03-02", 1, "success", 900, minute=1, cold=True)
     add_run(cold_con, "k2", "dt=2026-03-03", 1, "success", 11, minute=2)
@@ -310,7 +310,7 @@ def run():
          "a single cold observation gives no band and no verdict")
     cold_con.close()
 
-    # holdout_fire_rate, the day-7 fix to the number the pager gate reads for volume. the
+    # holdout_fire_rate, the fix to the number the pager gate reads for volume. the
     # fixture is a quiet front half and a back half that steps well outside it, so an
     # implementation that fitted on everything would report a much lower rate than one that
     # fitted on the front only. a fixture whose two halves looked alike could not tell them
@@ -332,7 +332,7 @@ def run():
     # because thirty loud values out of a hundred leave the median alone and the band tight,
     # so both report 1.0 and the mutant survives. Under mean and standard deviation the loud
     # half drags the band out far enough to cover itself, which is the same contamination
-    # effect day 3 measured on the doubled day. That is the pair that separates them.
+    # effect measured on the doubled day. That is the pair that separates them.
     pulled = baseline.holdout_fire_rate(series, estimator="mean_sd")
     c.eq(pulled[1], 1.0, "held out, the loud half is still outside the quiet half's band")
     whole = baseline.Baseline.fit([(k, v) for k, v, _ in series], estimator="mean_sd")

@@ -160,7 +160,7 @@ def run_tests():
     c.eq(len(scanned), 1, "scan returns only the partitions that are not clean")
     c.eq(scanned[0].partition, D, "and it returns the right one")
 
-    # the day-7 clean rate annotation. three subjects on purpose. one measured noisy, one
+    # the clean rate annotation. three subjects on purpose. one measured noisy, one
     # measured quiet and one absent entirely. the rule that matters is that an absent count
     # is not treated as a quiet one, and a fixture holding only a noisy subject would pass
     # whether or not that distinction existed.

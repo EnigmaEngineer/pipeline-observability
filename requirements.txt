@@ -1,7 +1,7 @@
 duckdb==1.5.5
 
 # matplotlib is imported by five scripts under scripts/ and was declared nowhere until
-# 2026-08-08. duckdb has no runtime dependencies of its own, checked against the PyPI
+# checked. duckdb has no runtime dependencies of its own, checked against the PyPI
 # metadata for 1.5.5, so a clean install of the line above brings in nothing else and
 # those five scripts had nothing to import.
 #
@@ -13,7 +13,7 @@ duckdb==1.5.5
 # It went unnoticed for two reasons. matplotlib is already present in the sandbox this
 # project was built in, and no CI job here runs a chart script.
 #
-# The pin is the version that sandbox reports, checked on 2026-07-31 and again on
-# 2026-08-08. It is not a record of what produced any particular chart, because the version
+# The pin is the version this sandbox reports, checked twice.
+# It is not a record of what produced any particular chart, because the version
 # was never captured at the time a chart was written.
 matplotlib==3.10.9

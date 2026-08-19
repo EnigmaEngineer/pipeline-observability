@@ -145,7 +145,7 @@ class Verdict:
     score: float = None
     band: Band = None
     # What the value was compared against when there is no band. Only a constant signal
-    # sets it. Day 5 needs it because a constant that moved up and a constant that moved
+    # sets it. Alerting needs it because a constant that moved up and a constant that moved
     # down are different incidents, and 'changed' on its own cannot say which.
     expected: object = None
 
@@ -248,7 +248,7 @@ def holdout_fire_rate(observations, split=HOLDOUT_SPLIT, min_train=MIN_HOLDOUT_T
     unknown rate and would silently approve a zero.
 
     **This exists because the number `page_eligible` was reading for volume was in sample
-    until day 7.** Day 5 established that the gate needs an out of sample rate, fixed every
+    for a long time.** The gate needs an out of sample rate. That was established, every
     drift signal, and left volume alone. Volume is the only subject the policy lets page. The
     band was fitted on all 119 partitions and counted on the last 56 of those same 119, which
     reads 0.036 and clears the 0.05 limit. Split properly at 83 and 36 it reads 0.083 and does
@@ -346,7 +346,7 @@ SEASONAL_KEY_MIN_GAIN = 0.9
 def choose_keying(observations, k=DEFAULT_K, space="log", estimator="median_mad"):
     """Say whether this series should be banded per key or pooled, and show the working.
 
-    The blueprint line for this project reads "seasonal baseline model for volume and
+    The plan for this said "seasonal baseline model for volume and
     duration" as if seasonality were a property of the project rather than of a series.
     It is not. Volume here is strongly weekly and duration is not weekly at all, so this
     is a measurement and not a setting.

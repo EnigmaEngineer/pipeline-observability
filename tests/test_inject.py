@@ -1,6 +1,6 @@
 """Tests for the fault injections.
 
-An injection that does not change the thing it claims to change turns the whole day-6
+An injection that does not change the thing it claims to change turns the whole
 harness into a report about nothing. A monitor that fails to detect a fault that was
 never injected reads exactly like a monitor that missed a real one, and there is no way
 to tell them apart from the detection table. So every scenario here is asserted to have

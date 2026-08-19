@@ -1,6 +1,6 @@
 """Records that map one to one onto the metadata tables.
 
-The point of these is that the day-2 collector builds objects and the store writes them,
+The point of these is that the collector builds objects and the store writes them,
 so a column added to the schema fails at the dataclass instead of silently landing in the
 wrong position of a tuple.
 """
@@ -74,7 +74,7 @@ class RunRecord:
         looking up an attempt number and inserting a row.
 
         Measured on 08-05 at 2.8 ms against a recorded median of 30, so 9 percent of
-        every duration this project stored before today was its own observability. Day 2
+        every duration this project stored for a while was its own observability. The collector
         moved the profiling queries out of the tracked block for exactly this reason and
         left the run row insert inside it. Durations recorded before this change are not
         comparable with ones recorded after, which is why the history gets rebuilt rather
@@ -140,8 +140,8 @@ class ColumnMetric:
         return None if self.top_values is None else json.dumps(self.top_values)
 
 
-# The probabilities the day-4 drift check will compare on. Fixed here rather than passed
+# The probabilities the drift check compares on. Fixed here rather than passed
 # in, because two runs summarised at different probabilities cannot be compared and the
 # only way to guarantee they are not is to make it not a parameter. Nothing reads this
-# yet. It is here so day 2 and day 4 cannot each pick their own.
+# yet. It is here so the collector and the drift check cannot each pick their own.
 QUANTILE_PROBS = (0.01, 0.05, 0.25, 0.50, 0.75, 0.95, 0.99)

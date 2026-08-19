@@ -5,7 +5,7 @@
     python scripts/worked_incidents.py --obs-db /tmp/obs.duckdb --db /tmp/wh.duckdb
 
 `incident_report.py` counts detections across all ten faults. That answers "does the stack
-catch things". It does not answer the question the README needed for day 7, which is what a
+catch things". It does not answer the question the README needed, which is what a
 person actually does with one alert at 3am. These three are picked because they fail in
 three different ways and the middle one is the uncomfortable one.
 
@@ -17,14 +17,14 @@ Two things get applied here that `incident_report.py` does not apply, and both c
 writing these three up.
 
 **A subject that fires on every clean partition is quarantined.** `duration_ms` fired on 10
-of 10 clean out of sample partitions on day 6, at `info`, which put a line carrying no
+of 10 clean out of sample partitions, at `info`, which put a line carrying no
 information on every incident view in the project. `alerting.quarantine` holds it out of the
-stream and states it once. That is the day-7 answer to `ot-023` and it is a containment
+stream and states it once. That is the answer taken to the filesystem problem and it is a containment
 rather than a fix.
 
 **Every surviving alert carries how often its subject fires on clean data.** Three of the
 five lines on the truncate timeline fire on ordinary days too. The control arm has known
-that since day 6 and the timeline was never told, so the reader was left to invent a
+that and the timeline was never told, so the reader was left to invent a
 ranking. `timeline.assemble` now takes those counts.
 """
 

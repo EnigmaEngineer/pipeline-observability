@@ -21,7 +21,7 @@ Column summaries are quantiles at fixed probabilities, not histograms. A histogr
 bin edges chosen up front and edges chosen from week one are wrong by week five. Fixed
 probabilities are comparable across any two days without agreeing on anything. The cost
 is real. You cannot recover a distribution from seven quantiles, so a bimodal shift that
-leaves the quantiles alone is invisible to this schema. That limitation belongs to day 4
+leaves the quantiles alone is invisible to this schema. That limitation belongs to the drift check
 and it is written in the README.
 """
 
@@ -112,7 +112,7 @@ TABLES = [
 ]
 
 # cold_start says whether this was the first attempt at its (pipeline, task) inside the
-# process that ran it. Added day 5 because the duration monitor fires on every restart and
+# process that ran it. Added because the duration monitor fires on every restart and
 # nothing in the metadata could tell a restart from a regression. It has to be written by
 # the tracker at the moment the run starts. It cannot be recovered later from a gap in
 # started_at, because a backfill and a schedule produce the same gaps and mean opposite
@@ -162,7 +162,7 @@ def expected_columns():
 def check_shape(con):
     """Raise if an existing metadata database does not match the DDL in this file.
 
-    `ot-021`, decided on day 7. `apply` runs CREATE TABLE IF NOT EXISTS, so a database
+    `apply` runs CREATE TABLE IF NOT EXISTS, so a database
     created before a column was added keeps the old shape and the create is a no-op. The
     first thing that notices is an INSERT failing on a column count, several layers away
     from the cause, with a message about parameters rather than about migrations.
@@ -170,7 +170,7 @@ def check_shape(con):
     A real migration path is a version row and an ALTER ladder. That is a day of work and
     it is not what this project is demonstrating, so it is not here. What is here is the
     difference between failing at the point of the problem and failing four frames later.
-    Adding `cold_start` on day 5 would have hit this on any database that already existed,
+    Adding `cold_start` would have hit this on any database that already existed,
     and nothing noticed because every run rebuilds from scratch under /tmp.
 
     Returns the tables it checked, so a caller cannot mistake a skipped check for a pass.
@@ -192,7 +192,7 @@ def check_shape(con):
                 f"{table} in this database does not match the shipped DDL. "
                 f"missing {missing or 'nothing'}, unexpected {extra or 'nothing'}. "
                 "this schema is create only and has no migration path, so an existing "
-                "database has to be rebuilt or altered by hand. see ot-021 in the README."
+                "database has to be rebuilt or altered by hand. see the README."
             )
         checked.append(table)
     return checked
@@ -211,6 +211,6 @@ def apply(con, dialect="duckdb"):
 
 
 # Snowflake accepts PRIMARY KEY and FOREIGN KEY and then does not enforce either one.
-# So the constraints above are documentation there and a real guard here. The day-2
+# So the constraints above are documentation there and a real guard here. The
 # collector has to treat a duplicate grain as its own problem rather than expect the
 # warehouse to reject it.

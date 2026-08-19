@@ -133,7 +133,7 @@ def observed(raw, tmp):
     if verdict is None or verdict.status == "ok":
         return 1, "a new status category did not register against real metadata"
 
-    # day 5. the same verdict has to come out of the alerting layer as a ticket rather
+    # the same verdict has to come out of the alerting layer as a ticket rather
     # than a page, because a new category is not an emergency, and a lost one is.
     gained = alerting.raise_alert("drift", "distinct_count", verdict, fire_rate=0.0)
     lost = alerting.raise_alert(
@@ -145,7 +145,7 @@ def observed(raw, tmp):
         return 1, f"a lost category routed to {lost and lost.severity}, not a page"
 
     # and the coverage check has to come back clean on a pipeline that just ran properly.
-    # this is the ot-016 check running against metadata something really wrote, which is
+    # this is the coverage check running against metadata something really wrote, which is
     # where the 119 false positives showed up rather than in any unit test.
     if cover["no_dataset_metric"] or cover["no_column_metric"]:
         return 1, (f"coverage found {len(cover['no_dataset_metric'])} runs with no "

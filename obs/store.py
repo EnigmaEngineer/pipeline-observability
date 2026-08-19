@@ -108,7 +108,7 @@ def table_names(con):
 
 
 def columns_of(con, table):
-    """Ordered (name, type) pairs for a table. This is what the day-2 collector will
+    """Ordered (name, type) pairs for a table. This is what the collector will
     hash to detect a schema change on the pipeline's own output tables."""
     rows = con.execute(
         """

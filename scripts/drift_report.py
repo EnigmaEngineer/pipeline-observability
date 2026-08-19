@@ -1,6 +1,6 @@
 """Measure every choice the drift checks make, rather than asserting them in a README.
 
-Same job as `scripts/baseline_report.py` does for day 3. Every number the README quotes
+Same job as `scripts/baseline_report.py` does for the baselines. Every number the README quotes
 about drift comes out of here, so a claim in the docs is a claim something committed will
 reproduce.
 
@@ -47,7 +47,7 @@ def fmt(v, places=4):
 def signals_table(observations_by_column):
     print("\n== signals: which of these is actually a drift signal ==")
     print("correlation with the partition row count. a signal that tracks row count is a")
-    print("volume monitor under another name, and day 3 already built the volume monitor.")
+    print("volume monitor under another name, and the volume monitor already exists.")
     print(f"{'column':<18}{'signal':<17}{'coupling':>10}  verdict")
     kept = {}
     for column, obs in observations_by_column.items():
@@ -69,7 +69,7 @@ def signals_table(observations_by_column):
 
 def keying_table(observations_by_column, kept):
     print("\n== keying: does a drift signal need the weekday key that volume needed ==")
-    print("day 3 found volume strongly weekly and duration not weekly at all. this is the")
+    print("the baselines found volume strongly weekly and duration not weekly at all. this is the")
     print("same question asked again per signal, through the same choose_keying call.")
     print(f"{'column':<18}{'signal':<17}{'ratio':>8}{'r2':>8}{'adj':>8}  keying")
     for column, (series, usable, _refused) in kept.items():
@@ -149,7 +149,7 @@ def bound_section(observations_by_column, warehouse=None):
 
 def trend_section(observations_by_column, kept, window=28):
     print(f"\n== trend: do these signals drift across the window, as volume does ==")
-    print("ot-017 says the volume band holds 35 percent of its width as trend rather than")
+    print("the volume band holds 35 percent of its width as trend rather than")
     print("variability. the same question has to be answered for every signal here and")
     print("the answer is not the same one.")
     print(f"{'column':<18}{'signal':<17}{'first' + str(window):>12}"
@@ -172,7 +172,7 @@ def trend_section(observations_by_column, kept, window=28):
 
 
 def noise_section(observations_by_column, kept):
-    """The second order version of ot-017, and the reason the first order version is not
+    """The second order version of the trend problem, and the reason the first order is not
     a problem here.
 
     A signal like `quantile_shift` or `share_tv` is a distance from a fixed reference, so
@@ -220,7 +220,7 @@ def noise_section(observations_by_column, kept):
 def fire_section(observations_by_column, kept):
     print("\n== fire: how often each band binds on its own training history ==")
     print("measured on the partitions the band was fitted on, so this is a floor on the")
-    print("false alarm rate and not an estimate of it. holds until day 6.")
+    print("false alarm rate and not an estimate of it. holds until a real failure goes in.")
     print("a signal that never moved is held as a constant and fires on any change, which")
     print("is why several rows below read 0.000 and are not asleep.")
     print(f"{'column':<18}{'signal':<17}{'kind':>10}{'fired':>7}{'rate':>8}")

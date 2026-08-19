@@ -105,7 +105,7 @@ def run():
         [later.schema_hash]).fetchone()[0]
     c.eq(kept, NOW, "first_seen_at is not moved by a later sighting")
 
-    # update_run and columns_of both exist for the day-2 collector. an untested function
+    # update_run and columns_of both exist for the collector. an untested function
     # waiting for a caller is how a repo accumulates code nobody has run.
     run = RunRecord(run_id="r9", pipeline="orders", task="build_daily",
                     partition_key="dt=2026-05-02", started_at=NOW)
@@ -128,7 +128,7 @@ def run():
     c.ok(not any("{" in s for s in sf), "no unsubstituted placeholders in snowflake ddl")
     c.raises(ValueError, lambda: schema.ddl("bigquery"), "unknown dialect is rejected")
 
-    # ot-021, decided day 7. the expected column list is parsed back out of the DDL rather
+    # the expected column list is parsed back out of the DDL rather
     # than written twice, so the first thing to check is that the parse agrees with what
     # the database actually got. a parser that dropped a column would make check_shape
     # raise on a fresh database, and a parser that kept the constraint lines would make it
@@ -155,7 +155,7 @@ def run():
     old.execute(stripped)
     c.raises_message(RuntimeError, "cold_start", lambda: schema.check_shape(old),
                      "an old shaped table raises and names the missing column")
-    c.raises_message(RuntimeError, "ot-021", lambda: schema.apply(old),
+    c.raises_message(RuntimeError, "altered by hand", lambda: schema.apply(old),
                      "apply raises too, so no caller can reach an insert on it")
     old.close()
 

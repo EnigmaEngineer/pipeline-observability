@@ -1,7 +1,7 @@
 """Source events for the pipeline this project instruments.
 
 There is no real order stream to point at, so one gets generated. That creates a trap
-worth naming here rather than in a footnote. Day 3 of this project builds a seasonal
+worth naming here rather than in a footnote. This project builds a seasonal
 baseline for volume. If the generator lays down a clean weekly pattern and the baseline
 then learns that pattern, nothing has been demonstrated. The model recovered a shape it
 was handed.
@@ -13,8 +13,8 @@ multiplicative day-of-week factor times a slow trend times lognormal noise. A ba
 that assumes additive weekday offsets on the raw counts will be wrong in a way that
 shows up in the residuals.
 
-The day-3 test is not fit quality. It is whether the baseline stays quiet through the
-nuisances a real feed has. Those go in on day 6 as injected failures.
+The test of that baseline is not fit quality. It is whether it stays quiet through the
+nuisances a real feed has. Those arrive later as injected failures.
 
 Determinism is per day, not per run. Regenerating a single date gives byte-identical
 output whether or not its neighbours were regenerated, which matters because backfilling
@@ -133,9 +133,9 @@ def main():
     print(f"wrote {total} events across {days} partitions to {out_root}")
 
 
-# TODO(day 6): injected failures live here. A partial day where the feed stops at 14:00,
+# TODO(inject): injected failures live here. A partial day where the feed stops at 14:00,
 # a double load of one partition, and a new column appearing mid-history. Keep them off
-# by default so the baseline in day 3 trains on clean history.
+# by default so the baselines train on clean history.
 
 if __name__ == "__main__":
     main()

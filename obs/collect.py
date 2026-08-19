@@ -45,7 +45,7 @@ from .model import (
 DISTINCT_EXACT = True
 
 # Quantiles are the most expensive thing in the single pass, 31.4 ms of 79.4, and
-# approx_quantile was 2.57x faster at a worst error of 0.27 percent on the day-2 run.
+# approx_quantile was 2.57x faster at a worst error of 0.27 percent when measured.
 # It is still not used.
 # The estimator is a t-digest and it depends on the order rows arrive in. Reading the same
 # 254,952 rows in a different physical order moved p05 by 0.35 percent with the data
@@ -232,7 +232,7 @@ def collect_into(obs_con, con, run_id, dataset, **kwargs):
     """Profile and write, and swallow anything that goes wrong.
 
     Deliberate. The pipeline does not fail because the thing watching it failed. What is
-    left behind is a run row with no dataset metric, and day 5 treats a successful run
+    left behind is a run row with no dataset metric, and the alerting layer treats a successful run
     that produced no metrics as its own alert. That gap only exists because the run row
     is written before the work rather than after, which the tracker guarantees and the
     foreign key on obs_dataset_metric enforces. The weakness of that is real and it is in

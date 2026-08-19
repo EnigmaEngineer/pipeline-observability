@@ -1,6 +1,6 @@
 """Faults injected into one partition, so the monitors get something real to fail on.
 
-Days 3 to 5 built monitors and measured every one of them against a feed that never
+Every monitor in this project was measured against a feed that never
 breaks. That answers half the question. A stack that stays quiet on clean data and also
 stays quiet on a broken partition is not quiet. It is off.
 
@@ -14,7 +14,7 @@ numeric quantiles. The last two are here because nothing obviously owns them, wh
 the more useful kind of result.
 
 None of these are on by default. `pipeline/generate.py` writes clean partitions and the
-day-3 baseline trains on those. The injected days are appended after the clean history
+baselines train on those. The injected days are appended after the clean history
 by `scripts/incident_report.py`, so a monitor judging one of them is judging a partition
 it has never seen. That is out of sample by construction rather than by promise.
 """
@@ -108,7 +108,7 @@ def scale_column(events, column="order_amount_usd", factor=100.0, **_):
     """A currency unit bug. Cents arrive where dollars were expected.
 
     The whole distribution moves and its shape does not, which is the case a quantile
-    vector should be good at. Day 4 proved a seven point vector cannot see a bimodal
+    vector should be good at. The drift work proved a seven point vector cannot see a bimodal
     shift. This is the other end of that.
     """
     out = []
@@ -121,11 +121,12 @@ def scale_column(events, column="order_amount_usd", factor=100.0, **_):
 
 
 def shift_item_count(events, column="item_count", by=1, share=0.5, seed=19, **_):
-    """Half the rows gain an item. This is ot-019 given something to be tested against.
+    """Half the rows gain an item. This gives the integer resolution question something
+    to be tested against.
 
     `item_count` is an integer from 1 to 9, so its seven stored quantiles are the same
     seven integers on every clean partition and `quantile_shift` is exactly zero across
-    the whole history. The open thread says a change smaller than one whole integer at a
+    the whole history. A change smaller than one whole integer at a
     stored probability is invisible. Adding a whole one is the largest move the column
     can make. If the monitor cannot see this then it cannot see anything on this column
     and the thread has its answer.
@@ -141,7 +142,7 @@ def shift_item_count(events, column="item_count", by=1, share=0.5, seed=19, **_)
 
 
 def late_arrival(events, prior_events=None, share=0.25, seed=17, **_):
-    """A share of yesterday's events land in today's file. This is ot-015.
+    """A share of yesterday's events land in today's file. This is late arrival.
 
     `build_daily` groups on `dt`, the partition the file arrived in, and not on
     `ordered_at`. So these rows are counted on the wrong day and the day they belong to
@@ -165,7 +166,7 @@ def drop_column(events, column="channel", **_):
     The key is gone from the JSON, not set to null. Those are different bytes on disk
     and the interesting question is whether they are different anywhere downstream,
     given that `pipeline/orders.py` declares its column list rather than inferring it.
-    That declaration was a day-1 decision made to stop the loader retyping a column on a
+    That declaration was deliberate, made to stop the loader retyping a column on a
     null heavy day. What it costs is measured in `scripts/incident_report.py`.
     """
     return [{k: v for k, v in event.items() if k != column} for event in events]
@@ -200,9 +201,9 @@ SCENARIOS = [
     ("amount_scale", scale_column, {},
      "drift quantile_shift", "every amount is 100x, so the whole vector moves"),
     ("item_shift", shift_item_count, {},
-     "drift quantile_shift", "ot-019, the largest move a 1 to 9 integer column can make"),
+     "drift quantile_shift", "the largest move a 1 to 9 integer column can make"),
     ("late_arrival", late_arrival, {},
-     "none declared", "ot-015, rows counted on the wrong day. no monitor owns this"),
+     "none declared", "rows counted on the wrong day. no monitor owns this"),
     ("dropped_column", drop_column, {},
      "schema", "a column disappears upstream and the loader declares its own columns"),
     ("no_change", stall_load, {},

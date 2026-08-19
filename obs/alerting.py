@@ -4,18 +4,18 @@ Like `baseline.py` and `drift.py` this imports no duckdb. It takes verdicts and 
 into things a person is expected to answer for. `obs/history.py` is still the only file in
 the path that knows SQL exists.
 
-Days 3 and 4 built monitors. A monitor answers "is this partition unusual". An alert
+The baselines and the drift check are monitors. A monitor answers "is this partition unusual". An alert
 answers a different question, which is "should someone stop what they are doing". Those
 are not the same question and the gap between them is where most monitoring projects go
 wrong. The three rules below are the whole design.
 
-**A monitor that cannot judge must never wake anyone.** Day 3 made a zero width band
+**A monitor that cannot judge must never wake anyone.** The baseline makes a zero width band
 return `unbanded` and an unseen key return `unknown_key` rather than folding both into
 `ok`. That distinction only pays off here. Both route to `info` and neither can be
 promoted by any policy, because an alert derived from a band that refused to judge carries
 exactly as much information as the refusal did.
 
-**A signal that fires often cannot be a page.** The day-4 report prints a fire rate per
+**A signal that fires often cannot be a page.** The drift report prints a fire rate per
 signal, on the training history, which makes it a floor on the false alarm rate rather
 than an estimate. `page_eligible` reads that number back. A signal firing on 18 percent of
 its own training partitions will fire about once a week forever, and a pager that goes off
@@ -144,7 +144,7 @@ CANNOT_JUDGE = ("unbanded", "unknown_key")
 
 # A subject that fired on every clean partition the fit never saw is not a monitor. The
 # page gate above can only make an alert quieter, and quieter is not enough here, because
-# such a subject carries nothing at any severity. Day 6 measured `duration_ms` firing on 10
+# such a subject carries nothing at any severity. The clean arm measured `duration_ms` firing on 10
 # of 10 clean out of sample partitions at `info`, which put a meaningless line on every
 # incident view in the project.
 #
@@ -152,7 +152,7 @@ CANNOT_JUDGE = ("unbanded", "unknown_key")
 # rates on this feed are 1.000 for duration and 0.300, 0.100 and 0.100 for the other three
 # subjects that fire at all. Setting the line at 0.5 because those leave a gap would be
 # choosing a threshold from the ten partitions it is about to be judged on, which is the
-# day-3 mistake wearing new clothes. Everything below 1.0 keeps alerting and carries its
+# same mistake the baseline made, wearing new clothes. Everything below 1.0 keeps alerting and carries its
 # measured rate instead.
 QUARANTINE_FIRE_RATE = 1.0
 
@@ -193,7 +193,8 @@ def quarantine(clean_counts, limit=QUARANTINE_FIRE_RATE):
     a monitor rather than about any partition, and the 08-04 lesson is that a fact about a
     monitor gets stated once at fit time.
 
-    This does not fix a quarantined subject. It stops it lying every day. `ot-023` is the
+    This does not fix a quarantined subject. It stops it lying every day. The filesystem
+    problem is the
     live example and the README says what the real fixes would cost.
     """
     held = {}
@@ -295,7 +296,7 @@ def raise_alert(monitor, signal, verdict, partition=None, fire_rate=None,
     Returns None when the verdict was fine and also when the monitor could not judge it.
     The second case is not an alert and `coverage_gaps` is where it goes instead.
 
-    `quarantined` is the third way to get None back and it is the day-7 addition. The
+    `quarantined` is the third way to get None back and it came last. The
     caller decides it with `quarantine` above, because that needs a clean arm to measure
     against and this function only ever sees one verdict.
     """
@@ -361,7 +362,7 @@ def apply_windows(alerts, windows):
 
 # The cold start rule, and why it is not shipped as a suppression.
 #
-# ot-018 asked for the first run of a (pipeline, task) in a process to be labelled so the
+# The first run of a (pipeline, task) in a process wants labelling so the
 # duration monitor could stop firing on restarts. The label is now written, by the tracker,
 # in obs_run.cold_start. Suppressing on it is a different question and the answer here is
 # no. `cold_start_cost` is the measurement that says why, and the argument is in the
@@ -431,11 +432,11 @@ def counts_by_severity(alerts):
     return out
 
 
-# The two band scheme, which is this project's answer to ot-017.
+# The two band scheme, which is the answer to a band holding trend as if it were spread.
 #
 # The volume band fitted over the whole 119 partition history is 868 wide and 35 percent of
 # that width is the feed's own growth trend rather than spread. Fitted over the last 56 it
-# is 564 wide and fires five times as often. Day 4 moved the decision here on the grounds
+# is 564 wide and fires five times as often. The decision was moved here on the grounds
 # that alerting is the first consumer that pays for a band being wider than it needs to be.
 #
 # Having got here, the choice between them is a false one. A value outside the wide band is

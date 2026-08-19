@@ -117,7 +117,7 @@ def build_daily(con, dt: date, now=None):
     Grouping is on dt, the partition the file arrived in, not on ordered_at. So an event
     that happened on the 3rd but landed in the 4th's file is counted on the 4th. The
     generator never does that today, which means this pipeline is correct only because
-    its source is well behaved. Late arrival goes into the day-6 injected failures.
+    its source is well behaved. Late arrival goes into the injected failures.
     """
     now = now or now_utc()
     con.execute("DELETE FROM daily_orders WHERE dt = ?", [dt])

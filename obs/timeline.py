@@ -9,7 +9,7 @@ Like `baseline.py`, `drift.py` and `alerting.py` this imports no duckdb. It take
 and returns a structure. `obs/history.py` is still the only file in the path that knows
 SQL exists.
 
-**Upstream is declared here and it is not derived.** Day 1 chose four tables and none of
+**Upstream is declared here and it is not derived.** The metadata schema has four tables and none of
 them holds an edge. There is no dependency graph in this schema, so "which runs fed this
 one" has no answer inside the metadata. The tempting fix is to infer it from start order
 within a partition, and that is wrong. Two independent tasks that happen to run in
@@ -20,7 +20,7 @@ is one.
 
 **Last known good has three answers and not two.** A partition with no alerts is only
 good relative to the monitors that ran on it. If every monitor refused to judge that
-partition then "no alerts" means nothing was checked. Days 3 and 5 already drew that
+partition then "no alerts" means nothing was checked. The baselines and the alerting layer already drew that
 line, with `unbanded` and `unknown_key` kept out of `ok`, and this is where it pays off
 a second time. A timeline that offers an unjudged partition as the last known good batch
 is handing someone a reference value nobody ever verified.
@@ -116,11 +116,11 @@ class Timeline:
     schema: list = field(default_factory=list)
     last_good: Optional[LastGood] = None
     notes: list = field(default_factory=list)
-    # subject -> (fired, observed) on clean partitions the fit never saw. Day 7. Writing
+    # subject -> (fired, observed) on clean partitions the fit never saw. Writing
     # the three worked incidents made the hole obvious. A timeline listing five alerts
     # with nothing to separate them hands an on call engineer a ranking they have to
     # invent, and on this feed three of those five fire on ordinary days as well. The
-    # control arm has known that since day 6 and the incident view was never told.
+    # control arm knew that and the incident view was never told.
     clean_rates: dict = field(default_factory=dict)
 
     @property

@@ -39,7 +39,7 @@ class Checks:
     def raises_message(self, exc_type, fragment, fn, label):
         """Assert the exception and the text of it.
 
-        Added 2026-08-03 after the log space test on 08-02 passed against code with the
+        Added after the log space test passed against code with the
         guard deleted, because `math.log(0)` raises `ValueError` all by itself. Checking
         the type alone proves the language did something. Checking the message proves the
         guard did. Any test of a guard that raises a builtin exception type belongs here

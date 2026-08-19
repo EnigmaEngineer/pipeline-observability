@@ -2,7 +2,7 @@
 
     python scripts/gate_chart.py --obs-db /tmp/obs.duckdb --chart docs/volume_gate.png
 
-One chart because the day-7 finding is one comparison. The number that approved a page was
+One chart because the finding is one comparison. The number that approved a page was
 the only one measured on partitions the band had already seen. Every estimate that held some
 data back fails the same gate, and so does the least favourable reading of the smallest of
 them.

@@ -11,7 +11,7 @@ code was written. `ks_bound` assumed a cumulative function equals its probabilit
 own quantile, which holds for a continuous column and fails as soon as values repeat. On
 `item_count` it made two byte identical vectors bound apart by 0.49.
 
-The history fixture has collisions built into it. On 2026-08-02 three separate mutants of
+The history fixture has collisions built into it. Three separate mutants of
 `obs/history.py` survived because the fixture gave every partition one successful attempt,
 so the rule about which attempt counts was green without ever running. This one carries a
 partition that failed then succeeded twice with different values, one that only ever

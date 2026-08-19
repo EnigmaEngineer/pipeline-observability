@@ -1,7 +1,7 @@
 """The generator has to be boring in the ways the pipeline depends on.
 
 Determinism per day is the one that matters. Backfilling a single partition is routine,
-and if regenerating day 40 on its own produces different rows than regenerating the whole
+and if regenerating partition 40 on its own produces different rows than regenerating the whole
 range, then every volume comparison later is measuring the generator instead of the
 pipeline.
 """

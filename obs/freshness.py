@@ -1,20 +1,20 @@
 """Whether the events in a partition belong to the day the partition is named after.
 
-This module exists because of a measurement and not because of a plan. The day-6
+This module exists because of a measurement and not because of a plan. The
 injection harness put a late arrival fault through the stack and all five monitors that
 existed at the time passed it. `event_time_min` and `event_time_max` have been collected
-on every run since day 2 and until today nothing read them. Six days of a monitoring
+on every run from the start and for a long time nothing read them. A monitoring
 project storing a field no monitor consults.
 
 `build_daily` groups on `dt`, the partition the file landed in. It does not group on
 `ordered_at`, which is when the event actually happened. So a row that happened on the 3rd and
 arrived in the 4th's file is counted on the 4th, and the 3rd has already been built and
-will not be rebuilt. That is ot-015, open since day 1, and this is the half of it that
+will not be rebuilt. That has been open from the beginning, and this is the half of it that
 can be answered from run metadata.
 
 No band here and no history. The rule is known without a spread. A partition named
 `dt=2026-05-01` should hold events from 2026-05-01, and any event outside that range is
-wrong by definition rather than unusual by degree. Day 4 established that a signal whose
+wrong by definition rather than unusual by degree. The drift work established that a signal whose
 reference point is known should be held as a constant and not banded, and this is the
 same argument one step further. There is nothing to fit at all.
 

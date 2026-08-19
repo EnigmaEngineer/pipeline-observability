@@ -1,7 +1,7 @@
 """Driver for the orders pipeline.
 
 Runs one date or a range, one partition at a time, and prints a per-day line. Nothing
-here writes to the metadata tables yet. That is day 2, and the reason it is not here is
+here writes to the metadata tables yet. That is the collector's job, and the reason it is not here is
 that a collector guessing at row counts before it has been written is worse than an
 honest gap.
 """

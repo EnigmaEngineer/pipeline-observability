@@ -197,7 +197,7 @@ def run():
     every = alerting.cold_start_cost([1, 2], [True, True])
     c.eq(every["share"], 1.0, "a schedule where every run is cold reports 1.0")
 
-    # the day-7 quarantine. the bound is checked against the closed form first, because the
+    # the quarantine. the bound is checked against the closed form first, because the
     # bisection is the part that could be quietly wrong and the closed form is exact for
     # the all fired case. a bisection that returned its own starting point would pass a
     # test that only asserted "between 0 and 1".

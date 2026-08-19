@@ -1,10 +1,10 @@
 """Distribution drift checks over the stored column metrics.
 
-Like `obs/baseline.py` this imports no duckdb. It works on the values day 2 wrote into
+Like `obs/baseline.py` this imports no duckdb. It works on the values the collector wrote into
 `obs_column_metric` and knows nothing about how they got there. `obs/history.py` is the
 part that talks to the database.
 
-The blueprint line for today reads "distribution drift checks on key columns". Three
+This is distribution drift checks on key columns. Three
 things a column offers look like drift signals. Two of them are not.
 
 **The quantile vector cannot answer the question you want to ask.** The question is
@@ -19,12 +19,12 @@ the history. It can prove drift. It can never prove the absence of it.
 `blind_spot` says how much drift the schema is structurally unable to see. It is the
 largest gap between consecutive probabilities, because within one gap both cumulative
 functions are free to take any shape while every stored quantile stays put. At the
-probabilities day 2 chose that is 0.25, and `tests/test_drift.py` builds a pair of samples
+probabilities the collector stores that is 0.25, and `tests/test_drift.py` builds a pair of samples
 whose seven quantiles agree and whose true KS distance is 0.25.
 
 **`distinct_count` is a volume signal.** Its correlation with row count on `customer_id`
 over the 119 partition history is +0.9999, and a weekday baseline fitted on it comes out
-with the same shape as the volume baseline from day 3 to three decimal places. Banding it
+with the same shape as the volume baseline to three decimal places. Banding it
 produces a monitor that fires on a traffic change and calls it a cardinality problem.
 Dividing by row count reduces the coupling and does not remove it, because the expected
 number of distinct values in a sample is not linear in the sample size. `volume_coupling`
@@ -346,13 +346,13 @@ def usable_signals(series, row_counts, limit=MAX_VOLUME_COUPLING):
 def reference_quantiles(observations):
     """Elementwise median of the stored quantile vectors across the history.
 
-    A median rather than a mean, for the reason the day-3 baseline uses one. The history
+    A median rather than a mean, for the reason the volume baseline uses one. The history
     contains whatever anomalies the feed already had and a reference built by averaging
     them in is a reference that has learned them.
 
     This is fitted on the same partitions the fire rate is then measured over, so that
     rate is a floor on the false alarm rate and not an estimate of the real one. Same
-    caveat as day 3 and it stays until day 6 puts a held out failure in.
+    caveat as the baselines and it stays until the injection harness puts a held out failure in.
     """
     vectors = [o["quantiles"] for o in observations if o.get("quantiles")]
     if not vectors:
@@ -387,11 +387,11 @@ def _ordered(qmap):
 def signals_for(observation, ref_q, ref_s, probs=QUANTILE_PROBS):
     """Signal values for one partition against a reference supplied from outside.
 
-    This is the function day 6 needed and days 4 and 5 did not have. `signal_series`
+    This is the function the injection harness needed and nothing before it had. `signal_series`
     below derives its reference from the very observations it is scoring, which is
     correct when fitting and wrong the moment a partition has to be judged that the fit
     never saw. Without this there was no way to score a new partition at all, and the
-    day-5 holdout worked around it by taking values from a series computed over the whole
+    first holdout worked around it by taking values from a series computed over the whole
     history while taking bands from the first 70 percent. The bands were held out and the
     reference was not.
 
@@ -446,7 +446,7 @@ class Monitor:
     is worse than one that says so.
 
     A signal whose history never moved is held as a constant rather than as a band. That
-    is not a tidiness choice. A band from a robust spread of zero is degenerate, day 3
+    is not a tidiness choice. A band from a robust spread of zero is degenerate, the baseline
     made a degenerate band refuse to judge, and the signals that come out flat here are
     the ones whose first movement matters most. `status` has held four distinct values
     for all 119 partitions and a fifth appearing is the incident a categorical monitor
@@ -498,7 +498,7 @@ class Monitor:
         """Signal values for a partition this monitor was not fitted on.
 
         Uses the reference stored at fit time. That is the whole point of storing it and
-        until day 6 nothing called for it, so a monitor could be fitted and then had no
+        for a long time nothing called for it, so a monitor could be fitted and then had no
         way to score anything new. Every number in `scripts/incident_report.py` comes
         through here.
         """

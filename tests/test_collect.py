@@ -125,7 +125,7 @@ def run():
     c.eq(missing, None, "a collector failure returns None instead of raising")
     c.eq(obs.execute("SELECT count(*) FROM obs_dataset_metric WHERE run_id = ?",
                      ["r9"]).fetchone()[0], 0,
-         "and leaves no dataset metric, which is what day 5 alerts on")
+         "and leaves no dataset metric, which is what the alerting layer fires on")
 
     con.execute('CREATE TABLE odd ("a""b" INTEGER, "select" VARCHAR)')
     con.execute("""INSERT INTO odd VALUES (1, 'k'), (2, 'k')""")

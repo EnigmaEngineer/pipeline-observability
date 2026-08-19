@@ -131,7 +131,7 @@ def cold_start_history(con, pipeline="orders", task="load_raw"):
     """Duration per partition keyed on the cold start flag rather than on the weekday.
 
     Same shape as the other readers so it drops straight into `fit_bands`. The point is to
-    ask whether the cold start flag earns its place as a band key the same way day 3 asked
+    ask whether the cold start flag earns its place as a band key the same way the baseline asked
     it of the weekday, rather than assuming it does. On a backfill it does not, and the way
     it fails is the interesting part. See `scripts/alert_report.py`.
     """
@@ -165,8 +165,8 @@ def cold_start_history(con, pipeline="orders", task="load_raw"):
 def coverage(con, dataset="raw_orders", pipeline="orders", expected_partitions=None):
     """The three ways a partition can be silent, counted separately.
 
-    ot-016 opened on day 2 because `collect_into` swallows every exception, so a broken
-    collector leaves a successful run with no metric row. By day 4 that had turned into
+    This came up early because `collect_into` swallows every exception, so a broken
+    collector leaves a successful run with no metric row. That turned into
     three readers for which the same silence is invisible. This is the check.
 
     The three are not equally answerable and that is the finding.
@@ -262,7 +262,7 @@ def column_history(con, dataset="raw_orders", column="order_amount_usd",
 
     Returns `(observations, skipped)` where an observation is a dict carrying the
     weekday, the partition date and the raw stored values. A dict rather than a tuple
-    because there are six fields and a positional row of six is where the day-2 slicing
+    because there are six fields and a positional row of six is where the collector's slicing
     bug came from.
     """
     rows = con.execute(
@@ -353,8 +353,8 @@ def event_time_history(con, dataset="raw_orders", pipeline="orders"):
     """The event time range stored for each partition, against the partition it landed in.
 
     This reader is here because the columns it reads have been collected on every run
-    since day 2 and nothing has ever read them. Six days of a monitoring project storing
-    a field no monitor consults is its own small finding, and the day-6 late arrival
+    from the start and nothing has ever read them. A monitoring project storing
+    a field no monitor consults is its own small finding, and the late arrival
     injection is exactly the fault they exist to catch. `build_daily` groups on `dt`, so
     an event that happened on the 3rd and arrived in the 4th's file is counted on the
     4th and no other monitor in this repo can tell.
