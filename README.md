@@ -415,7 +415,7 @@ fix is not in the baseline. It is a label saying this run was cold, which the co
 does not write today, and suppression on it belongs next to the rest of the alert routing
 rather than in the baseline.
 
-**`build_daily` does not have this problem and that is the part worth noticing.** Its first
+**`build_daily` does not have this problem.** Its first
 run is 6 ms, which is the fastest of all 119 and sits 0.8 spreads *below* the centre. So
 the cold start is not a property of the first run of a process. It is a property of the
 first run of a task that has to load something, and `load_raw` opens the database and the

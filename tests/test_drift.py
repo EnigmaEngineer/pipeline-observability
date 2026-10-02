@@ -34,13 +34,11 @@ from tests.tiny import Checks
 DATASET = "raw_orders"
 COLUMN = "order_amount_usd"
 
-
 def add_run(con, run_id, partition, attempt, status, minute):
     store.insert_run(con, RunRecord(
         run_id=run_id, pipeline="orders", task="load_raw", partition_key=partition,
         started_at=datetime(2026, 3, 2, 9, 0) + timedelta(minutes=minute),
         status=status, attempt=attempt, duration_ms=10))
-
 
 def add_column(con, run_id, rows, quantiles=None, nulls=0, distinct=None,
                top=None, column=COLUMN):
@@ -55,23 +53,20 @@ def add_column(con, run_id, rows, quantiles=None, nulls=0, distinct=None,
         null_count=nulls, distinct_count=distinct, quantiles=quantiles,
         top_values=top)])
 
-
 def vector(shift=0.0):
     """A plausible stored quantile vector, optionally moved."""
     return {str(p): v + shift for p, v in
             zip(QUANTILE_PROBS, [9.0, 15.0, 27.0, 41.0, 66.0, 119.0, 178.0])}
-
 
 def observation(day, rows, quantiles=None, nulls=0, distinct=None, top=None):
     return {"weekday": day.weekday(), "date": day, "quantiles": quantiles,
             "null_count": nulls, "distinct_count": distinct, "top_values": top,
             "row_count": rows}
 
-
 def run():
     c = Checks("test_drift")
 
-    # --- the helper this file leans on, checked before it is trusted --------------
+    # the helper this file leans on, checked before it is trusted
     # raises_message exists because asserting an exception type proved nothing on
     # 08-02. If it ever stopped comparing the text it would go back to proving nothing,
     # and every guard below would quietly lose its test. A mutant that made it accept
@@ -86,7 +81,7 @@ def run():
     c.eq(len(probe.failures), 1,
          "and fails when the type is right but the message is not")
 
-    # --- what the schema structurally cannot see ---------------------------------
+    # what the schema structurally cannot see
     gaps = drift.prob_gaps()
     c.eq(len(gaps), len(QUANTILE_PROBS) + 1,
          "there is one more gap than there are probabilities, because the tails count")
@@ -106,7 +101,7 @@ def run():
          f"while their real KS distance is {true:.4f}, which is the blind spot reached "
          "rather than argued")
 
-    # --- the bound is a bound, and the tie case that broke it --------------------
+    # the bound is a bound, and the tie case that broke it
     ties = [1, 1, 1, 1, 2, 4, 6]
     c.eq(drift.ks_bound(ties, ties), 0.0,
          "two identical vectors with repeated values bound apart by zero. this is the "
@@ -146,7 +141,7 @@ def run():
                      lambda: drift.ks_bound([1, 2, 3], [1, 2, 3]),
                      "a vector of the wrong length is rejected by name")
 
-    # --- the readings that do work ------------------------------------------------
+    # the readings that do work
     ref = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0]
     c.eq(drift.iqr(ref), 20.0, "the interquartile range reads the stored 0.25 and 0.75")
     c.raises_message(ValueError, "needs 0.25 and 0.75",
@@ -163,7 +158,6 @@ def run():
          "an empty partition has no null rate, rather than a perfect one")
     c.eq(drift.null_rate(5, 20), 0.25, "and a normal one is a share of the rows")
 
-    # --- categorical shares -------------------------------------------------------
     s = drift.shares({"a": 60, "b": 20}, 100)
     c.ok(abs(s[None] - 0.2) < 1e-12,
          "the mass outside the stored top values is kept under a key of None")
@@ -176,7 +170,7 @@ def run():
     c.ok(new_category > 0.0,
          "a category appearing that was never there moves the distance")
 
-    # --- the coupling check, which is the day's main refusal ----------------------
+    # the coupling check, which is the day's main refusal
     rows = [1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700]
     series = {
         "tracks_rows": [n * 0.98 for n in rows],
@@ -203,7 +197,7 @@ def run():
     c.ok(inverse_refused["falls_as_rows_rise"]["coupling"] < -0.9,
          "and its coupling is recorded as the negative number it is")
 
-    # --- the history reader, on a fixture built to collide ------------------------
+    # the history reader, on a fixture built to collide
     con = store.connect(":memory:")
     days = [date(2026, 3, 2) + timedelta(days=i) for i in range(10)]
 
@@ -255,7 +249,7 @@ def run():
     _obs, dropped = history.column_history(unreadable, DATASET, COLUMN)
     c.eq(dropped, 1, "a partition key that is not a date is counted, not silently lost")
 
-    # --- the reference, and the corruption it refuses to average over -------------
+    # the reference, and the corruption it refuses to average over
     good = [observation(days[i], 1000, vector(i * 0.1)) for i in range(8)]
     reference = drift.reference_quantiles(good)
     c.eq(len(reference), len(QUANTILE_PROBS),
@@ -270,7 +264,6 @@ def run():
                      lambda: drift.reference_quantiles(mismatched),
                      "a history whose vectors disagree on their probabilities is refused")
 
-    # --- the monitor ---------------------------------------------------------------
     varied = [observation(days[i % 7] + timedelta(days=i), 1000 + i,
                           vector((i % 3) * 0.4), nulls=0, distinct=4,
                           top={"placed": 900, "cancelled": 100})

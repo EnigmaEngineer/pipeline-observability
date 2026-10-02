@@ -95,6 +95,9 @@ def run():
         try:
             orders.load_raw(con, DAY, raw)
         except Exception:
+            # The file is deliberately corrupt, so the load is meant to fail. What is being
+            # checked is the row count after it, not how it failed. Asserting on the
+            # exception type would pin duckdb's parser rather than this loader.
             pass
         broken.write_text(good)
         c.eq(con.execute("SELECT count(*) FROM raw_orders WHERE dt = ?",

@@ -16,14 +16,11 @@ from tests.tiny import Checks
 
 MONDAY = date(2026, 3, 2)
 
-
 def flat(key, value, n):
     return [(key, value)] * n
 
-
 def seeded(key, values):
     return [(key, v) for v in values]
-
 
 def add_run(con, run_id, partition, attempt, status, duration_ms, minute,
             task="load_raw", cold=False):
@@ -35,7 +32,6 @@ def add_run(con, run_id, partition, attempt, status, duration_ms, minute,
         started_at=datetime(2026, 3, 2, 9, 0, 0) + timedelta(minutes=minute),
         status=status, attempt=attempt, duration_ms=duration_ms, cold_start=cold))
 
-
 def add_metric(con, run_id, rows, dataset="raw_orders"):
     version = SchemaVersion.from_columns(dataset, [("a", "VARCHAR")], datetime(2026, 3, 2))
     store.upsert_schema_version(con, version)
@@ -43,11 +39,10 @@ def add_metric(con, run_id, rows, dataset="raw_orders"):
         run_id=run_id, dataset=dataset, schema_hash=version.schema_hash,
         row_count=rows, collected_at=datetime(2026, 3, 2)))
 
-
 def run():
     c = Checks("test_baseline")
 
-    # --- the estimators, and the reason there are two of them ---------------------
+    # the estimators, and the reason there are two of them
     centre, spread = baseline.median_mad([10, 10, 10, 10, 1000])
     c.eq(centre, 10, "one wild value does not move the median")
     mean_centre, mean_spread = baseline.mean_sd([10, 10, 10, 10, 1000])
@@ -69,7 +64,7 @@ def run():
     c.eq(baseline.Baseline({0: robust_dirty}).check(0, 400).status, "high",
          "and the contaminated value is still caught by the median band")
 
-    # --- a band with no width must not become an alert generator ------------------
+    # a band with no width must not become an alert generator
     degenerate = baseline.fit_bands(flat(0, 7, 20))[0]
     c.ok(degenerate.degenerate, "twenty identical values give a spread of zero")
     verdict = baseline.Baseline({0: degenerate}).check(0, 9999)
@@ -77,7 +72,7 @@ def run():
          "a zero width band refuses to judge instead of calling everything high")
     c.eq(verdict.score, None, "and reports no score, because there is nothing to divide by")
 
-    # --- an unknown key is not the same answer as a value inside a band -----------
+    # an unknown key is not the same answer as a value inside a band
     model = baseline.Baseline.fit(seeded(0, [10, 12, 11, 13, 9, 10, 11, 12]))
     c.eq(model.check(5, 11).status, "unknown_key", "a key with no band says so")
     c.eq(model.check(0, 11).status, "ok", "a value at the centre is ok")
@@ -86,7 +81,6 @@ def run():
     c.ok(model.check(0, 10000).score > 0 > model.check(0, 0.001).score,
          "the score is signed")
 
-    # --- log space -----------------------------------------------------------------
     # asserting only that this raises ValueError proves nothing, because math.log raises
     # ValueError on its own for both of these. The guard is only doing work if the message
     # is the one written here. A mutant that removed the check survived until this checked
@@ -114,13 +108,12 @@ def run():
              lambda: baseline.fit_bands(seeded(0, [1, 2]), estimator="vibes"),
              "so is an unknown estimator")
 
-    # --- too few observations is no band, not a narrow one -------------------------
+    # too few observations is no band, not a narrow one
     c.eq(len(baseline.fit_bands(seeded(0, [1, 2, 3]))), 0,
          "three observations do not earn a band")
     c.eq(len(baseline.fit_bands(seeded(0, [1, 2, 3]), min_n=3)), 1,
          "and the threshold is the only thing stopping them")
 
-    # --- variance explained --------------------------------------------------------
     separated = seeded(0, [10] * 8) + seeded(1, [1000] * 8)
     var = baseline.variance_explained(separated)
     c.ok(var["r2"] > 0.99, "fully separated groups explain nearly all the variance")
@@ -141,7 +134,7 @@ def run():
     c.eq(baseline.variance_explained(flat(0, 5, 10)), None,
          "no variance at all returns nothing rather than dividing by zero")
 
-    # --- choosing whether to key at all -------------------------------------------
+    # choosing whether to key at all
     keyed_call = baseline.choose_keying(
         seeded(0, [100, 104, 96, 102, 98, 101, 99]) +
         seeded(1, [500, 504, 496, 502, 498, 501, 499]))
@@ -178,7 +171,6 @@ def run():
              [(k, v, None) for k, v in lumpy]))[None].degenerate,
          "under the MAD both the flat key and the pooled set come out with no spread")
 
-    # --- fire rate ------------------------------------------------------------------
     counts, rate = model.fire_rate(seeded(0, [11, 11, 10000]))
     c.eq(counts["high"], 1, "fire_rate counts the value above the band")
     c.eq(counts["ok"], 2, "and the two inside it")
@@ -190,7 +182,7 @@ def run():
     c.ok(loo["hi_max"] > loo["hi_min"],
          "and with enough observations the held out edge really does move")
 
-    # --- history: what counts as one observation ------------------------------------
+    # history: what counts as one observation
     c.eq(history.partition_date("dt=2026-03-02"), MONDAY, "a partition key parses")
     c.eq(history.partition_date("2026-03-02"), None, "a key with no prefix does not")
     c.eq(history.partition_date("dt=not-a-date"), None, "nor does a bad date")
@@ -251,7 +243,6 @@ def run():
           "garbage"],
          "run_order keeps start order and both retries, which is where a cold start shows")
 
-    # --- coverage ---------------------------------------------------------------
     # Nothing above is missing a metric, so the check comes back clean on this fixture
     # and a clean check proves nothing. r9 is the case: a run that succeeded and wrote
     # no dataset metric, which is exactly what collect_into leaves behind when it
@@ -292,7 +283,6 @@ def run():
          "a partition nothing ever ran for is only findable from outside")
     c.eq(with_expected["never_ran_checked"], True, "and the flag flips when it is given")
 
-    # --- the cold start key ------------------------------------------------------
     cold_con = store.connect()
     add_run(cold_con, "k1", "dt=2026-03-02", 1, "success", 900, minute=1, cold=True)
     add_run(cold_con, "k2", "dt=2026-03-03", 1, "success", 11, minute=2)
@@ -348,7 +338,6 @@ def run():
 
     con.close()
     return c
-
 
 if __name__ == "__main__":
     sys.exit(run().report())
