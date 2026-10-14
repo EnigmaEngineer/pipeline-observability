@@ -6,7 +6,7 @@ number the README quotes about alerting comes out of here.
     python scripts/alert_report.py --obs-db /tmp/obs.duckdb --chart docs/alerts.png
 
 Eight sections. Four of them exist because a loose end came due and the answer
-was not the one the thread expected. The volume gate section came last, after the
+was not the one I expected. The volume gate section came last, after the
 worked incidents showed that the one subject allowed to page was approved on an in sample
 rate that had been fixed everywhere else.
 

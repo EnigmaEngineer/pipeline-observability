@@ -129,7 +129,7 @@ def shift_item_count(events, column="item_count", by=1, share=0.5, seed=19, **_)
     the whole history. A change smaller than one whole integer at a
     stored probability is invisible. Adding a whole one is the largest move the column
     can make. If the monitor cannot see this then it cannot see anything on this column
-    and the thread has its answer.
+    and the question has its answer.
     """
     rng = random.Random(seed)
     out = []
